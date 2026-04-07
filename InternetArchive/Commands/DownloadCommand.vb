@@ -42,103 +42,109 @@ Namespace InternetArchiveCli.Commands
             If parsed.ChecksumArchive Then
                 checksumArchiveEntries = LoadChecksumArchiveEntries("_checksum_archive.txt")
             End If
-            For i As Integer = 0 To ids.Count - 1
-                Dim identifier As String = ids(i)
-                Dim itemMetadata As Dictionary(Of String, Object)
-                Try
-                    itemMetadata = session.GetItemMetadata(identifier, Nothing)
-                Catch ex As Exception
-                    Console.Error.WriteLine(identifier & ": failed to retrieve item metadata - errors")
-                    If ex.Message.IndexOf("You are attempting to make an HTTPS", StringComparison.Ordinal) >= 0 Then
-                        Console.Error.WriteLine()
-                        Console.Error.WriteLine(ex.Message)
-                        Return 1
-                    End If
-                    Continue For
-                End Try
-
-                If IsDarkItem(itemMetadata) Then
-                    If Not parsed.Quiet Then
-                        Console.Error.WriteLine(" skipping " & identifier & ", item is dark")
-                    End If
-                    Continue For
+            Using sharedClient As New HttpClient()
+                If parsed.TimeoutSeconds.HasValue Then
+                    sharedClient.Timeout = TimeSpan.FromSeconds(parsed.TimeoutSeconds.Value)
                 End If
 
-                If itemMetadata.Count = 0 Then
-                    If Not parsed.Quiet Then
-                        Console.Error.WriteLine(" skipping " & identifier & ", item does not exist.")
-                    End If
-                    Continue For
-                End If
+                For i As Integer = 0 To ids.Count - 1
+                    Dim identifier As String = ids(i)
+                    Dim itemMetadata As Dictionary(Of String, Object)
+                    Try
+                        itemMetadata = session.GetItemMetadata(identifier, Nothing)
+                    Catch ex As Exception
+                        Console.Error.WriteLine(identifier & ": failed to retrieve item metadata - errors")
+                        If ex.Message.IndexOf("You are attempting to make an HTTPS", StringComparison.Ordinal) >= 0 Then
+                            Console.Error.WriteLine()
+                            Console.Error.WriteLine(ex.Message)
+                            Return 1
+                        End If
+                        Continue For
+                    End Try
 
-                Dim fileCandidates = GetCandidateFiles(identifier, itemMetadata, parsed)
-                If fileCandidates.Count = 0 Then
-                    If Not parsed.Quiet Then
-                        Console.Error.WriteLine(" skipping " & identifier & ", no matching files found.")
+                    If IsDarkItem(itemMetadata) Then
+                        If Not parsed.Quiet Then
+                            Console.Error.WriteLine(" skipping " & identifier & ", item is dark")
+                        End If
+                        Continue For
                     End If
-                    Continue For
-                End If
 
-                If Not parsed.Quiet AndAlso Not parsed.DryRun AndAlso Not parsed.StdoutOutput Then
-                    If ids.Count > 1 Then
-                        Console.Error.WriteLine(
-                            String.Format(
-                                "{0} ({1}/{2}):",
-                                identifier,
-                                i + 1,
-                                ids.Count
+                    If itemMetadata.Count = 0 Then
+                        If Not parsed.Quiet Then
+                            Console.Error.WriteLine(" skipping " & identifier & ", item does not exist.")
+                        End If
+                        Continue For
+                    End If
+
+                    Dim fileCandidates = GetCandidateFiles(identifier, itemMetadata, parsed)
+                    If fileCandidates.Count = 0 Then
+                        If Not parsed.Quiet Then
+                            Console.Error.WriteLine(" skipping " & identifier & ", no matching files found.")
+                        End If
+                        Continue For
+                    End If
+
+                    If Not parsed.Quiet AndAlso Not parsed.DryRun AndAlso Not parsed.StdoutOutput Then
+                        If ids.Count > 1 Then
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    "{0} ({1}/{2}):",
+                                    identifier,
+                                    i + 1,
+                                    ids.Count
+                                )
                             )
+                        Else
+                            Console.Error.WriteLine(identifier & ":")
+                        End If
+                    End If
+
+                    For Each fileEntry In fileCandidates
+                        Dim fileName As String = fileEntry.Name
+                        Dim fileUrl As String = BuildDownloadUrl(session, identifier, fileName, parsed.RequestParameters)
+
+                        If parsed.DryRun Then
+                            Console.WriteLine(fileUrl)
+                            Continue For
+                        End If
+
+                        Dim relativePath As String
+                        If parsed.NoDirectories Then
+                            relativePath = fileName
+                        Else
+                            relativePath = identifier & "/" & fileName
+                        End If
+                        Dim destinationPath As String = ResolveDestinationPath(relativePath, parsed.DestDir)
+                        If Not EnsurePathWithinBase(destinationPath, parsed.DestDir) Then
+                            Console.Error.WriteLine(" error: Unsafe file path resolved outside destination directory: " & destinationPath)
+                            hasErrors = True
+                            Continue For
+                        End If
+
+                        If ShouldSkipExisting(destinationPath, fileEntry, parsed, checksumArchiveEntries) Then
+                            Continue For
+                        End If
+
+                        Dim success As Boolean = DownloadSingleFile(
+                            sharedClient,
+                            fileUrl,
+                            fileName,
+                            destinationPath,
+                            parsed.StdoutOutput,
+                            Not parsed.Quiet AndAlso Not parsed.StdoutOutput,
+                            parsed.Retries
                         )
-                    Else
-                        Console.Error.WriteLine(identifier & ":")
-                    End If
-                End If
+                        If Not success Then
+                            hasErrors = True
+                            Continue For
+                        End If
 
-                For Each fileEntry In fileCandidates
-                    Dim fileName As String = fileEntry.Name
-                    Dim fileUrl As String = BuildDownloadUrl(session, identifier, fileName, parsed.RequestParameters)
-
-                    If parsed.DryRun Then
-                        Console.WriteLine(fileUrl)
-                        Continue For
-                    End If
-
-                    Dim relativePath As String
-                    If parsed.NoDirectories Then
-                        relativePath = fileName
-                    Else
-                        relativePath = identifier & "/" & fileName
-                    End If
-                    Dim destinationPath As String = ResolveDestinationPath(relativePath, parsed.DestDir)
-                    If Not EnsurePathWithinBase(destinationPath, parsed.DestDir) Then
-                        Console.Error.WriteLine(" error: Unsafe file path resolved outside destination directory: " & destinationPath)
-                        hasErrors = True
-                        Continue For
-                    End If
-
-                    If ShouldSkipExisting(destinationPath, fileEntry, parsed, checksumArchiveEntries) Then
-                        Continue For
-                    End If
-
-                    Dim success As Boolean = DownloadSingleFile(
-                        fileUrl,
-                        fileName,
-                        destinationPath,
-                        parsed.StdoutOutput,
-                        Not parsed.Quiet AndAlso Not parsed.StdoutOutput,
-                        parsed.TimeoutSeconds,
-                        parsed.Retries
-                    )
-                    If Not success Then
-                        hasErrors = True
-                        Continue For
-                    End If
-
-                    If Not parsed.NoChangeTimestamp Then
-                        ApplyMtime(destinationPath, fileEntry)
-                    End If
+                        If Not parsed.NoChangeTimestamp Then
+                            ApplyMtime(destinationPath, fileEntry)
+                        End If
+                    Next
                 Next
-            Next
+            End Using
 
             Return If(hasErrors, 1, 0)
         End Function
@@ -185,78 +191,72 @@ Namespace InternetArchiveCli.Commands
             End Using
         End Function
 
-        Private Shared Function DownloadSingleFile(url As String, displayName As String, destinationPath As String, stdoutOutput As Boolean,
-                                                   showProgress As Boolean, timeoutSeconds As Double?, retries As Integer) As Boolean
+        Private Shared Function DownloadSingleFile(client As HttpClient, url As String, displayName As String, destinationPath As String, stdoutOutput As Boolean,
+                                                   showProgress As Boolean, retries As Integer) As Boolean
 
             Dim attempts As Integer = Math.Max(1, retries)
-            Using client As New HttpClient()
-                If timeoutSeconds.HasValue Then
-                    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds.Value)
-                End If
-
-                For i As Integer = 1 To attempts
-                    Try
-                        Using response As HttpResponseMessage = client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult()
-                            If Not response.IsSuccessStatusCode Then
-                                If i = attempts Then
-                                    Console.Error.WriteLine(
-                                        String.Format(" error downloading file {0}, status {1}", destinationPath, CInt(response.StatusCode))
-                                    )
-                                    Return False
-                                End If
-                                Continue For
+            For i As Integer = 1 To attempts
+                Try
+                    Using response As HttpResponseMessage = client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult()
+                        If Not response.IsSuccessStatusCode Then
+                            If i = attempts Then
+                                Console.Error.WriteLine(
+                                    String.Format(" error downloading file {0}, status {1}", destinationPath, CInt(response.StatusCode))
+                                )
+                                Return False
                             End If
-
-                            Dim totalBytes As Long = 0
-                            If response.Content.Headers.ContentLength.HasValue Then
-                                totalBytes = response.Content.Headers.ContentLength.Value
-                            End If
-                            Dim progress = BuildDownloadProgressReporter(displayName, showProgress)
-
-                            Using source As Stream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-                                Dim target As Stream = Nothing
-                                Dim disposeTarget As Boolean = False
-                                Try
-                                    If stdoutOutput Then
-                                        target = Console.OpenStandardOutput()
-                                    Else
-                                        Dim parent As String = Path.GetDirectoryName(destinationPath)
-                                        If Not String.IsNullOrWhiteSpace(parent) Then
-                                            Directory.CreateDirectory(parent)
-                                        End If
-                                        target = New FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None)
-                                        disposeTarget = True
-                                    End If
-
-                                    Dim buffer(1048575) As Byte
-                                    Dim bytesRead As Integer = 0
-                                    Dim bytesReceived As Long = 0
-                                    Do
-                                        bytesRead = source.Read(buffer, 0, buffer.Length)
-                                        If bytesRead <= 0 Then
-                                            Exit Do
-                                        End If
-                                        target.Write(buffer, 0, bytesRead)
-                                        bytesReceived += bytesRead
-                                        progress?.Invoke(bytesReceived, totalBytes)
-                                    Loop
-                                    progress?.Invoke(bytesReceived, If(totalBytes > 0, totalBytes, bytesReceived))
-                                Finally
-                                    If disposeTarget AndAlso target IsNot Nothing Then
-                                        target.Dispose()
-                                    End If
-                                End Try
-                            End Using
-                            Return True
-                        End Using
-                    Catch ex As Exception
-                        If i = attempts Then
-                            Console.Error.WriteLine(" error downloading file " & destinationPath & ", exception raised: " & ex.Message)
-                            Return False
+                            Continue For
                         End If
-                    End Try
-                Next
-            End Using
+
+                        Dim totalBytes As Long = 0
+                        If response.Content.Headers.ContentLength.HasValue Then
+                            totalBytes = response.Content.Headers.ContentLength.Value
+                        End If
+                        Dim progress = BuildDownloadProgressReporter(displayName, showProgress)
+
+                        Using source As Stream = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+                            Dim target As Stream = Nothing
+                            Dim disposeTarget As Boolean = False
+                            Try
+                                If stdoutOutput Then
+                                    target = Console.OpenStandardOutput()
+                                Else
+                                    Dim parent As String = Path.GetDirectoryName(destinationPath)
+                                    If Not String.IsNullOrWhiteSpace(parent) Then
+                                        Directory.CreateDirectory(parent)
+                                    End If
+                                    target = New FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None)
+                                    disposeTarget = True
+                                End If
+
+                                Dim buffer(1048575) As Byte
+                                Dim bytesRead As Integer = 0
+                                Dim bytesReceived As Long = 0
+                                Do
+                                    bytesRead = source.Read(buffer, 0, buffer.Length)
+                                    If bytesRead <= 0 Then
+                                        Exit Do
+                                    End If
+                                    target.Write(buffer, 0, bytesRead)
+                                    bytesReceived += bytesRead
+                                    progress?.Invoke(bytesReceived, totalBytes)
+                                Loop
+                                progress?.Invoke(bytesReceived, If(totalBytes > 0, totalBytes, bytesReceived))
+                            Finally
+                                If disposeTarget AndAlso target IsNot Nothing Then
+                                    target.Dispose()
+                                End If
+                            End Try
+                        End Using
+                        Return True
+                    End Using
+                Catch ex As Exception
+                    If i = attempts Then
+                        Console.Error.WriteLine(" error downloading file " & destinationPath & ", exception raised: " & ex.Message)
+                        Return False
+                    End If
+                End Try
+            Next
             Return False
         End Function
 

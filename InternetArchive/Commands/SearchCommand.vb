@@ -23,86 +23,91 @@ Namespace InternetArchiveCli.Commands
                 Return 0
             End If
             Dim serializer As New JavaScriptSerializer()
+            Using sharedClient As New HttpClient()
 
-            Try
-                Dim preparedFields As List(Of String) = PrepareValues(parsed.Fields)
-                Dim preparedSorts As List(Of String) = PrepareValues(parsed.Sorts)
+                Try
+                    Dim preparedFields As List(Of String) = PrepareValues(parsed.Fields)
+                    Dim preparedSorts As List(Of String) = PrepareValues(parsed.Sorts)
 
-                If parsed.NumFound Then
-                    Dim count As Integer = GetNumFound(
+                    If parsed.NumFound Then
+                        Dim count As Integer = GetNumFound(
+                            sharedClient,
+                            session,
+                            parsed.Query,
+                            parsed.Parameters,
+                            parsed.Headers,
+                            parsed.TimeoutSeconds,
+                            parsed.Fts,
+                            parsed.DslFts
+                        )
+                        Console.WriteLine(count.ToString(CultureInfo.InvariantCulture))
+                        Return 0
+                    End If
+
+                    Dim results As IEnumerable(Of Dictionary(Of String, Object)) = ExecuteSearch(
+                        sharedClient,
                         session,
                         parsed.Query,
                         parsed.Parameters,
                         parsed.Headers,
+                        preparedFields,
+                        preparedSorts,
                         parsed.TimeoutSeconds,
                         parsed.Fts,
                         parsed.DslFts
                     )
-                    Console.WriteLine(count.ToString(CultureInfo.InvariantCulture))
-                    Return 0
-                End If
 
-                Dim results As IEnumerable(Of Dictionary(Of String, Object)) = ExecuteSearch(
-                    session,
-                    parsed.Query,
-                    parsed.Parameters,
-                    parsed.Headers,
-                    preparedFields,
-                    preparedSorts,
-                    parsed.TimeoutSeconds,
-                    parsed.Fts,
-                    parsed.DslFts
-                )
-
-                For Each result In results
-                    If parsed.ItemList Then
-                        If parsed.Fts OrElse parsed.DslFts Then
-                            Dim fieldsNode As Object = Nothing
-                            If result.TryGetValue("fields", fieldsNode) Then
-                                Dim fieldDict = TryCast(fieldsNode, Dictionary(Of String, Object))
-                                If fieldDict IsNot Nothing AndAlso fieldDict.ContainsKey("identifier") Then
-                                    Dim identifiers = AsStringList(fieldDict("identifier"))
-                                    For Each id In identifiers
-                                        Console.WriteLine(id)
-                                    Next
+                    For Each result In results
+                        If parsed.ItemList Then
+                            If parsed.Fts OrElse parsed.DslFts Then
+                                Dim fieldsNode As Object = Nothing
+                                If result.TryGetValue("fields", fieldsNode) Then
+                                    Dim fieldDict = TryCast(fieldsNode, Dictionary(Of String, Object))
+                                    If fieldDict IsNot Nothing AndAlso fieldDict.ContainsKey("identifier") Then
+                                        Dim identifiers = AsStringList(fieldDict("identifier"))
+                                        For Each id In identifiers
+                                            Console.WriteLine(id)
+                                        Next
+                                    End If
+                                End If
+                            Else
+                                Dim identifier As Object = Nothing
+                                If result.TryGetValue("identifier", identifier) Then
+                                    Console.WriteLine(Convert.ToString(identifier))
+                                Else
+                                    Console.WriteLine(String.Empty)
                                 End If
                             End If
                         Else
-                            Dim identifier As Object = Nothing
-                            If result.TryGetValue("identifier", identifier) Then
-                                Console.WriteLine(Convert.ToString(identifier))
-                            Else
-                                Console.WriteLine(String.Empty)
+                            Console.WriteLine(serializer.Serialize(result))
+                            If result.ContainsKey("error") Then
+                                Return 1
                             End If
                         End If
-                    Else
-                        Console.WriteLine(serializer.Serialize(result))
-                        If result.ContainsKey("error") Then
-                            Return 1
-                        End If
-                    End If
-                Next
-                Return 0
-            Catch ex As ValueErrorException
-                Console.Error.WriteLine("error: " & ex.Message)
-                Return 1
-            Catch ex As AuthenticationError
-                Console.Error.WriteLine("error: " & ex.Message)
-                Return 1
-            Catch ex As TaskCanceledException
-                Console.Error.WriteLine(
-                    "error: Request timed out. Increase the --timeout and try again."
-                )
-                Return 1
-            Catch ex As TimeoutException
-                Console.Error.WriteLine(
-                    "error: The server timed out and failed to return all search results, please try again"
-                )
-                Return 1
-            End Try
+                    Next
+                    Return 0
+                Catch ex As ValueErrorException
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
+                Catch ex As AuthenticationError
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
+                Catch ex As TaskCanceledException
+                    Console.Error.WriteLine(
+                        "error: Request timed out. Increase the --timeout and try again."
+                    )
+                    Return 1
+                Catch ex As TimeoutException
+                    Console.Error.WriteLine(
+                        "error: The server timed out and failed to return all search results, please try again"
+                    )
+                    Return 1
+                End Try
+            End Using
         End Function
 
         Private Shared Function AdvancedSearch(
+            client As HttpClient,
             session As ArchiveSession,
             params As Dictionary(Of String, Object),
             headers As Dictionary(Of String, Object),
@@ -131,6 +136,7 @@ Namespace InternetArchiveCli.Commands
 
             Dim url As String = session.Protocol & "//" & session.Host & "/advancedsearch.php"
             Dim json = SendRequestAndDeserialize(
+                client,
                 session,
                 HttpMethod.Get,
                 url,
@@ -264,6 +270,7 @@ Namespace InternetArchiveCli.Commands
         End Sub
 
         Private Shared Function ExecuteSearch(
+            client As HttpClient,
             session As ArchiveSession,
             query As String,
             params As Dictionary(Of String, Object),
@@ -275,15 +282,15 @@ Namespace InternetArchiveCli.Commands
             dslFts As Boolean
         ) As IEnumerable(Of Dictionary(Of String, Object))
             If fts OrElse dslFts Then
-                Return FullTextSearch(session, query, params, headers, timeoutSeconds, dslFts)
+                Return FullTextSearch(client, session, query, params, headers, timeoutSeconds, dslFts)
             End If
 
             Dim queryText As String = query
             Dim searchParams = BuildDefaultSearchParams(queryText, params)
             If searchParams.ContainsKey("page") Then
-                Return AdvancedSearch(session, searchParams, headers, fields, sorts, timeoutSeconds)
+                Return AdvancedSearch(client, session, searchParams, headers, fields, sorts, timeoutSeconds)
             End If
-            Return ScrapeSearch(session, searchParams, headers, fields, sorts, timeoutSeconds)
+            Return ScrapeSearch(client, session, searchParams, headers, fields, sorts, timeoutSeconds)
         End Function
 
         Private Shared Function ExtractAdvancedNumFound(
@@ -300,6 +307,7 @@ Namespace InternetArchiveCli.Commands
         End Function
 
         Private Shared Function FullTextSearch(
+            client As HttpClient,
             session As ArchiveSession,
             query As String,
             params As Dictionary(Of String, Object),
@@ -335,6 +343,7 @@ Namespace InternetArchiveCli.Commands
             While True
                 Dim payload As String = serializer.Serialize(body)
                 Dim json = SendRequestAndDeserialize(
+                    client,
                     session,
                     HttpMethod.Post,
                     url,
@@ -378,6 +387,7 @@ Namespace InternetArchiveCli.Commands
         End Function
 
         Private Shared Function GetNumFound(
+            client As HttpClient,
             session As ArchiveSession,
             query As String,
             params As Dictionary(Of String, Object),
@@ -394,6 +404,7 @@ Namespace InternetArchiveCli.Commands
                 Dim p = BuildDefaultSearchParams(queryText, params)
                 Dim url As String = session.Protocol & "//be-api.us.archive.org/ia-pub-fts-api"
                 Dim json = SendRequestAndDeserialize(
+                    client,
                     session,
                     HttpMethod.Get,
                     url,
@@ -417,6 +428,7 @@ Namespace InternetArchiveCli.Commands
                 searchParams("output") = "json"
                 Dim url As String = session.Protocol & "//" & session.Host & "/advancedsearch.php"
                 Dim json = SendRequestAndDeserialize(
+                    client,
                     session,
                     HttpMethod.Get,
                     url,
@@ -431,6 +443,7 @@ Namespace InternetArchiveCli.Commands
             searchParams("total_only") = "true"
             Dim scrapeUrl As String = session.Protocol & "//" & session.Host & "/services/search/v1/scrape"
             Dim scrape = SendRequestAndDeserialize(
+                client,
                 session,
                 HttpMethod.Post,
                 scrapeUrl,
@@ -618,6 +631,7 @@ Namespace InternetArchiveCli.Commands
         End Sub
 
         Private Shared Function ScrapeSearch(
+            client As HttpClient,
             session As ArchiveSession,
             params As Dictionary(Of String, Object),
             headers As Dictionary(Of String, Object),
@@ -640,6 +654,7 @@ Namespace InternetArchiveCli.Commands
 
             While True
                 Dim json = SendRequestAndDeserialize(
+                    client,
                     session,
                     HttpMethod.Post,
                     url,
@@ -683,6 +698,7 @@ Namespace InternetArchiveCli.Commands
         End Function
 
         Private Shared Function SendRequestAndDeserialize(
+            client As HttpClient,
             session As ArchiveSession,
             method As HttpMethod,
             url As String,
@@ -692,19 +708,16 @@ Namespace InternetArchiveCli.Commands
             timeoutSeconds As Double
         ) As Dictionary(Of String, Object)
             Dim finalUrl As String = BuildUrl(url, params)
-            Using handler As New HttpClientHandler()
-                Using client As New HttpClient(handler)
-                    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds)
-                    Dim request As New HttpRequestMessage(method, finalUrl)
-                    ApplyHeaders(request, headers)
-                    ApiShared.ApplyLowAuth(request, session.AccessKey, session.SecretKey)
-                    If jsonBody IsNot Nothing Then
-                        request.Content = New StringContent(jsonBody, Encoding.UTF8, "application/json")
-                    End If
+            client.Timeout = TimeSpan.FromSeconds(timeoutSeconds)
+            Using request As New HttpRequestMessage(method, finalUrl)
+                ApplyHeaders(request, headers)
+                ApiShared.ApplyLowAuth(request, session.AccessKey, session.SecretKey)
+                If jsonBody IsNot Nothing Then
+                    request.Content = New StringContent(jsonBody, Encoding.UTF8, "application/json")
+                End If
 
-                    Dim response = client.SendAsync(request).GetAwaiter().GetResult()
+                Using response = client.SendAsync(request).GetAwaiter().GetResult()
                     Dim payload As String = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
                     Dim serializer As New JavaScriptSerializer()
                     Dim decoded = serializer.DeserializeObject(payload)
                     Dim result = TryCast(decoded, Dictionary(Of String, Object))
@@ -714,6 +727,7 @@ Namespace InternetArchiveCli.Commands
                     Return result
                 End Using
             End Using
+
         End Function
 
         Private NotInheritable Class SearchArgs
