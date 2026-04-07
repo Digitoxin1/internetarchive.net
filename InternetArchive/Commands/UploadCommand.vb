@@ -163,7 +163,8 @@ Namespace InternetArchiveCli.Commands
                         parsed.Identifier
                     )
                     Dim psi As New ProcessStartInfo(detailsUrl) With {.UseShellExecute = True}
-                    Process.Start(psi)
+                    Using launched As Process = Process.Start(psi)
+                    End Using
                 Catch
                 End Try
             End If
@@ -701,7 +702,8 @@ Namespace InternetArchiveCli.Commands
                                 identifier
                             )
                             Dim psi As New ProcessStartInfo(detailsUrl) With {.UseShellExecute = True}
-                            Process.Start(psi)
+                            Using launched As Process = Process.Start(psi)
+                            End Using
                         Catch
                         End Try
                     End If

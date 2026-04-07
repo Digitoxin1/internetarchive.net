@@ -16,64 +16,66 @@ Namespace InternetArchiveCli.Services
             }
 
             Using client As New Net.Http.HttpClient()
-                Dim content As New Net.Http.FormUrlEncodedContent(formPairs)
-                Dim response = client.PostAsync(url, content).GetAwaiter().GetResult()
-                Dim body As String = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                Threading.Thread.Sleep(2000)
+                Using content As New Net.Http.FormUrlEncodedContent(formPairs)
+                    Using response As Net.Http.HttpResponseMessage = client.PostAsync(url, content).GetAwaiter().GetResult()
+                        Dim body As String = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                        Threading.Thread.Sleep(2000)
 
-                Dim serializer As New JavaScriptSerializer()
-                Dim payload = serializer.Deserialize(Of Dictionary(Of String, Object))(body)
-                Dim successObj As Object = Nothing
-                If payload.TryGetValue("success", successObj) AndAlso Convert.ToBoolean(successObj) Then
-                    Dim values = CType(payload("values"), Dictionary(Of String, Object))
-                    Dim s3 = CType(values("s3"), Dictionary(Of String, Object))
-                    Dim cookies = CType(values("cookies"), Dictionary(Of String, Object))
+                        Dim serializer As New JavaScriptSerializer()
+                        Dim payload = serializer.Deserialize(Of Dictionary(Of String, Object))(body)
+                        Dim successObj As Object = Nothing
+                        If payload.TryGetValue("success", successObj) AndAlso Convert.ToBoolean(successObj) Then
+                            Dim values = CType(payload("values"), Dictionary(Of String, Object))
+                            Dim s3 = CType(values("s3"), Dictionary(Of String, Object))
+                            Dim cookies = CType(values("cookies"), Dictionary(Of String, Object))
 
-                    Return New Dictionary(Of String, Dictionary(Of String, String))(
-                        StringComparer.OrdinalIgnoreCase
-                    ) From {
-                        {
-                            "s3",
-                            New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase) From {
-                                {"access", Convert.ToString(s3("access"))},
-                                {"secret", Convert.ToString(s3("secret"))}
+                            Return New Dictionary(Of String, Dictionary(Of String, String))(
+                                StringComparer.OrdinalIgnoreCase
+                            ) From {
+                                {
+                                    "s3",
+                                    New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase) From {
+                                        {"access", Convert.ToString(s3("access"))},
+                                        {"secret", Convert.ToString(s3("secret"))}
+                                    }
+                                },
+                                {
+                                    "cookies",
+                                    New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase) From {
+                                        {"logged-in-user", Convert.ToString(cookies("logged-in-user"))},
+                                        {"logged-in-sig", Convert.ToString(cookies("logged-in-sig"))}
+                                    }
+                                },
+                                {
+                                    "general",
+                                    New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase) From {
+                                        {"screenname", Convert.ToString(values("screenname"))}
+                                    }
+                                }
                             }
-                        },
-                        {
-                            "cookies",
-                            New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase) From {
-                                {"logged-in-user", Convert.ToString(cookies("logged-in-user"))},
-                                {"logged-in-sig", Convert.ToString(cookies("logged-in-sig"))}
-                            }
-                        },
-                        {
-                            "general",
-                            New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase) From {
-                                {"screenname", Convert.ToString(values("screenname"))}
-                            }
-                        }
-                    }
-                End If
+                        End If
 
-                Dim message As String = "Authentication failed"
-                Dim valuesNode As Object = Nothing
-                If payload.TryGetValue("values", valuesNode) Then
-                    Dim values = TryCast(valuesNode, Dictionary(Of String, Object))
-                    If values IsNot Nothing AndAlso values.ContainsKey("reason") Then
-                        message = Convert.ToString(values("reason"))
-                    End If
-                ElseIf payload.ContainsKey("error") Then
-                    message = Convert.ToString(payload("error"))
-                End If
+                        Dim message As String = "Authentication failed"
+                        Dim valuesNode As Object = Nothing
+                        If payload.TryGetValue("values", valuesNode) Then
+                            Dim values = TryCast(valuesNode, Dictionary(Of String, Object))
+                            If values IsNot Nothing AndAlso values.ContainsKey("reason") Then
+                                message = Convert.ToString(values("reason"))
+                            End If
+                        ElseIf payload.ContainsKey("error") Then
+                            message = Convert.ToString(payload("error"))
+                        End If
 
-                If String.Equals(message, "account_not_found", StringComparison.Ordinal) Then
-                    message = "Account not found, check your email and try again."
-                ElseIf String.Equals(message, "account_bad_password", StringComparison.Ordinal) Then
-                    message = "Incorrect password, try again."
-                Else
-                    message = String.Format("Authentication failed: {0}", message)
-                End If
-                Throw New AuthenticationError(message)
+                        If String.Equals(message, "account_not_found", StringComparison.Ordinal) Then
+                            message = "Account not found, check your email and try again."
+                        ElseIf String.Equals(message, "account_bad_password", StringComparison.Ordinal) Then
+                            message = "Incorrect password, try again."
+                        Else
+                            message = String.Format("Authentication failed: {0}", message)
+                        End If
+                        Throw New AuthenticationError(message)
+                    End Using
+                End Using
             End Using
         End Function
 
