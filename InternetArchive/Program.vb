@@ -231,7 +231,8 @@ Module Program
             If version IsNot Nothing Then
                 Return version.ToString()
             End If
-        Catch
+        Catch ex As Exception
+            Console.Error.WriteLine("warning: unable to determine CLI version from assembly metadata - " & ex.Message)
         End Try
 
         Return "0.0.0.0"

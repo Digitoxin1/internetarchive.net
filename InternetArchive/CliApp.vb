@@ -12,7 +12,8 @@ Namespace InternetArchiveCli
                         Return executable
                     End If
                 End If
-            Catch
+            Catch ex As Exception
+                Console.Error.WriteLine("warning: failed to resolve executable name; using default ia.exe (" & ex.Message & ")")
             End Try
 
             Return "ia.exe"

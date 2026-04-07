@@ -53,7 +53,7 @@ Namespace InternetArchiveCli.Commands
                     Try
                         itemMetadata = session.GetItemMetadata(identifier, Nothing)
                     Catch ex As Exception
-                        Console.Error.WriteLine(identifier & ": failed to retrieve item metadata - errors")
+                        Console.Error.WriteLine(identifier & ": failed to retrieve item metadata - " & ex.Message)
                         If ex.Message.IndexOf("You are attempting to make an HTTPS", StringComparison.Ordinal) >= 0 Then
                             Console.Error.WriteLine()
                             Console.Error.WriteLine(ex.Message)
@@ -158,7 +158,14 @@ Namespace InternetArchiveCli.Commands
                 Try
                     Dim dt = DateTimeOffset.FromUnixTimeSeconds(mtime).UtcDateTime
                     File.SetLastWriteTimeUtc(destinationPath, dt)
-                Catch
+                Catch ex As Exception
+                    Console.Error.WriteLine(
+                        String.Format(
+                            " warning: could not set modification time for '{0}': {1}",
+                            destinationPath,
+                            ex.Message
+                        )
+                    )
                 End Try
             End If
         End Sub
@@ -818,11 +825,21 @@ Namespace InternetArchiveCli.Commands
                 Return entries
             End If
 
-            For Each line In File.ReadLines(archiveFile)
-                If line.Length > 0 Then
-                    entries.Add(line)
-                End If
-            Next
+            Try
+                For Each line In File.ReadLines(archiveFile)
+                    If line.Length > 0 Then
+                        entries.Add(line)
+                    End If
+                Next
+            Catch ex As Exception
+                Console.Error.WriteLine(
+                    String.Format(
+                        " warning: could not read checksum archive '{0}': {1}",
+                        archiveFile,
+                        ex.Message
+                    )
+                )
+            End Try
             Return entries
         End Function
 

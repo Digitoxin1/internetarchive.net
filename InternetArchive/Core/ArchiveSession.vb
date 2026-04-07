@@ -108,7 +108,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object) = Nothing
                         Try
                             body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("copy S3 object response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
                         Return New ApiCallResult With {
@@ -173,7 +174,8 @@ Namespace InternetArchiveCli.Core
                             Dim body As Dictionary(Of String, Object) = Nothing
                             Try
                                 body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                            Catch
+                            Catch ex As Exception
+                                WarnJsonParseFallback("delete S3 file response", ex)
                                 body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                             End Try
                             lastResult = New ApiCallResult With {
@@ -289,6 +291,7 @@ Namespace InternetArchiveCli.Core
                     Using response As HttpResponseMessage = client.SendAsync(request).GetAwaiter().GetResult()
                         Dim tasks As New List(Of Dictionary(Of String, Object))()
                         Dim serializer As New JavaScriptSerializer()
+                        Dim skippedNonJsonLines As Integer = 0
                         If CInt(response.StatusCode) >= 400 Then
                             Dim text = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
                             ThrowForTasksError(response, text)
@@ -314,11 +317,36 @@ Namespace InternetArchiveCli.Core
                                             tasks.Add(dict)
                                         End If
                                     Catch
-                                        ' ignore non-JSON lines
+                                        skippedNonJsonLines += 1
                                     End Try
                                 End While
                             End Using
                         End Using
+
+                        If skippedNonJsonLines > 0 Then
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    "warning: skipped {0} non-JSON line(s) while parsing tasks response.",
+                                    skippedNonJsonLines
+                                )
+                            )
+                        End If
+
+                        Dim invalidSubmitTimeCount As Integer = 0
+                        For Each task In tasks
+                            Dim parsedSubmitTime As DateTime
+                            If Not TryGetSubmitTime(task, parsedSubmitTime) Then
+                                invalidSubmitTimeCount += 1
+                            End If
+                        Next
+                        If invalidSubmitTimeCount > 0 Then
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    "warning: {0} task(s) had missing or unparseable submittime values.",
+                                    invalidSubmitTimeCount
+                                )
+                            )
+                        End If
 
                         tasks.Sort(AddressOf CompareTaskByDateDesc)
                         Return tasks
@@ -388,7 +416,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object)
                         Try
                             body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("lock/unlock account response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
                         If CInt(response.StatusCode) >= 400 Then
@@ -426,7 +455,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object)
                         Try
                             body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("lookup account response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
                         Return New ApiCallResult With {
@@ -493,7 +523,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object) = Nothing
                         Try
                             body = serializer.Deserialize(Of Dictionary(Of String, Object))(responseText)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("metadata patch response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
 
@@ -531,7 +562,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object) = Nothing
                         Try
                             body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("simplelists patch response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
                         Return New ApiCallResult With {
@@ -563,7 +595,20 @@ Namespace InternetArchiveCli.Core
                             If j IsNot Nothing AndAlso j.ContainsKey("over_limit") Then
                                 Return Convert.ToInt32(j("over_limit"), CultureInfo.InvariantCulture) <> 0
                             End If
-                        Catch
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    "warning: unable to determine overload status for '{0}' from S3 response; treating as overloaded.",
+                                    normalizedIdentifier
+                                )
+                            )
+                        Catch ex As Exception
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    "warning: failed to parse S3 overload status for '{0}': {1}; treating as overloaded.",
+                                    normalizedIdentifier,
+                                    ex.Message
+                                )
+                            )
                             Return True
                         End Try
                         Return True
@@ -693,7 +738,8 @@ Namespace InternetArchiveCli.Core
                         Dim parsed As Dictionary(Of String, Object)
                         Try
                             parsed = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("submit task response", ex)
                             parsed = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
 
@@ -792,7 +838,8 @@ Namespace InternetArchiveCli.Core
                             Dim body As Dictionary(Of String, Object) = Nothing
                             Try
                                 body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                            Catch
+                            Catch ex As Exception
+                                WarnJsonParseFallback("upload S3 file response", ex)
                                 body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                             End Try
                             Dim responseHeaders As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
@@ -923,37 +970,46 @@ Namespace InternetArchiveCli.Core
         End Function
 
         Private Shared Function ParseSubmitTime(task As Dictionary(Of String, Object)) As DateTime
+            Dim dt As DateTime
+            If TryGetSubmitTime(task, dt) Then
+                Return dt
+            End If
+            Return DateTime.MinValue
+        End Function
+
+        Private Shared Function TryGetSubmitTime(task As Dictionary(Of String, Object), ByRef submitTime As DateTime) As Boolean
+            submitTime = DateTime.MinValue
             If task Is Nothing Then
-                Return DateTime.MinValue
+                Return False
             End If
             If task.ContainsKey("category") AndAlso
                String.Equals(Convert.ToString(task("category")), "summary", StringComparison.OrdinalIgnoreCase) Then
-                Return DateTime.Now
+                submitTime = DateTime.Now
+                Return True
             End If
             If Not task.ContainsKey("submittime") Then
-                Return DateTime.MinValue
+                Return False
             End If
             Dim raw As String = Convert.ToString(task("submittime"), CultureInfo.InvariantCulture)
-            Dim dt As DateTime
             If DateTime.TryParseExact(
                 raw,
                 "yyyy-MM-dd HH:mm:ss.ffffff",
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.None,
-                dt
+                submitTime
             ) Then
-                Return dt
+                Return True
             End If
             If DateTime.TryParseExact(
                 raw,
                 "yyyy-MM-dd HH:mm:ss",
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.None,
-                dt
+                submitTime
             ) Then
-                Return dt
+                Return True
             End If
-            Return DateTime.MinValue
+            Return DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, submitTime)
         End Function
 
         Private Shared Sub ThrowForTasksError(response As HttpResponseMessage, text As String)
@@ -969,8 +1025,13 @@ Namespace InternetArchiveCli.Core
                 End If
             Catch ex As InvalidOperationException
                 Throw
-            Catch
-                ' fall through
+            Catch ex As Exception
+                Console.Error.WriteLine(
+                    String.Format(
+                        "warning: unable to parse tasks error response body: {0}",
+                        ex.Message
+                    )
+                )
             End Try
             Throw New InvalidOperationException(String.Format(
                 "HTTP {0} from Tasks API.",
@@ -1006,6 +1067,16 @@ Namespace InternetArchiveCli.Core
             Return result
         End Function
 
+        Private Shared Sub WarnJsonParseFallback(context As String, ex As Exception)
+            Console.Error.WriteLine(
+                String.Format(
+                    "warning: failed to parse {0} as JSON dictionary: {1}",
+                    context,
+                    ex.Message
+                )
+            )
+        End Sub
+
         Private Sub AddS3AuthHeader(request As HttpRequestMessage)
             ApiShared.ApplyLowAuth(request, AccessKey, SecretKey)
         End Sub
@@ -1026,7 +1097,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object) = Nothing
                         Try
                             body = serializer.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("flag request response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
                         Return New ApiCallResult With {
@@ -1079,7 +1151,8 @@ Namespace InternetArchiveCli.Core
                         Dim body As Dictionary(Of String, Object) = Nothing
                         Try
                             body = serializer2.Deserialize(Of Dictionary(Of String, Object))(text)
-                        Catch
+                        Catch ex As Exception
+                            WarnJsonParseFallback("review request response", ex)
                             body = New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
                         End Try
                         Return New ApiCallResult With {

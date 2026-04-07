@@ -149,7 +149,14 @@ Namespace InternetArchiveCli.Commands
                 If parsed.DeleteAfterUpload AndAlso Not String.IsNullOrWhiteSpace(target.LocalPath) Then
                     Try
                         File.Delete(target.LocalPath)
-                    Catch
+                    Catch ex As Exception
+                        Console.Error.WriteLine(
+                            String.Format(
+                                " warning: could not delete local file '{0}': {1}",
+                                target.LocalPath,
+                                ex.Message
+                            )
+                        )
                     End Try
                 End If
             Next
@@ -165,7 +172,13 @@ Namespace InternetArchiveCli.Commands
                     Dim psi As New ProcessStartInfo(detailsUrl) With {.UseShellExecute = True}
                     Using launched As Process = Process.Start(psi)
                     End Using
-                Catch
+                Catch ex As Exception
+                    Console.Error.WriteLine(
+                        String.Format(
+                            " warning: could not open item in browser: {0}",
+                            ex.Message
+                        )
+                    )
                 End Try
             End If
 
@@ -675,7 +688,14 @@ Namespace InternetArchiveCli.Commands
                     If parsed.DeleteAfterUpload AndAlso Not String.IsNullOrWhiteSpace(target.LocalPath) Then
                         Try
                             File.Delete(target.LocalPath)
-                        Catch
+                        Catch ex As Exception
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    " warning: could not delete local file '{0}': {1}",
+                                    target.LocalPath,
+                                    ex.Message
+                                )
+                            )
                         End Try
                     End If
 
@@ -690,7 +710,13 @@ Namespace InternetArchiveCli.Commands
                             Dim psi As New ProcessStartInfo(detailsUrl) With {.UseShellExecute = True}
                             Using launched As Process = Process.Start(psi)
                             End Using
-                        Catch
+                        Catch ex As Exception
+                            Console.Error.WriteLine(
+                                String.Format(
+                                    " warning: could not open item in browser: {0}",
+                                    ex.Message
+                                )
+                            )
                         End Try
                     End If
                 Next
@@ -783,7 +809,13 @@ Namespace InternetArchiveCli.Commands
                 If entries.Count > 0 Then
                     Return entries
                 End If
-            Catch
+            Catch ex As Exception
+                Console.Error.WriteLine(
+                    String.Format(
+                        " warning: could not parse file metadata as JSON '{0}'; trying JSONL.",
+                        fileMetadataPath
+                    )
+                )
             End Try
 
             Dim jsonlEntries As New List(Of Dictionary(Of String, Object))()

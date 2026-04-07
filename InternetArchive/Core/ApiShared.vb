@@ -77,7 +77,13 @@ Namespace InternetArchiveCli.Core
                     Return message & ": " & resource
                 End If
                 Return message
-            Catch
+            Catch ex As Exception
+                Console.Error.WriteLine(
+                    String.Format(
+                        "warning: failed to parse S3 XML response; using raw response text ({0})",
+                        ex.Message
+                    )
+                )
                 Return xmlText
             End Try
         End Function

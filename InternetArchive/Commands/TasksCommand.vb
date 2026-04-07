@@ -223,7 +223,18 @@ Namespace InternetArchiveCli.Commands
                     Throw
                 End If
                 ' fall through to key:value mode
-            Catch
+            Catch ex As Exception
+                Dim trimmed As String = raw.TrimStart()
+                If trimmed.StartsWith("{", StringComparison.Ordinal) OrElse
+                   trimmed.StartsWith("[", StringComparison.Ordinal) Then
+                    Throw New ArgumentException(
+                        String.Format(
+                            "{0} contains invalid JSON: {1}",
+                            optionName,
+                            ex.Message
+                        )
+                    )
+                End If
                 ' fall through to key:value mode
             End Try
 

@@ -24,6 +24,14 @@ Namespace InternetArchiveCli.Commands
                     Console.Error.WriteLine(parsed.Identifier & " - success: review indexed")
                     Return 0
                 End If
+                Console.Error.WriteLine(
+                    String.Format(
+                        "{0} - error: failed to index review{1}",
+                        parsed.Identifier,
+                        FormatApiErrorSuffix(r)
+                    )
+                )
+                Return 1
             ElseIf parsed.NoIndexReview Then
                 Dim r = session.NoIndexReview(
                     parsed.Identifier,
@@ -35,6 +43,14 @@ Namespace InternetArchiveCli.Commands
                     Console.Error.WriteLine(parsed.Identifier & " - success: review removed from index")
                     Return 0
                 End If
+                Console.Error.WriteLine(
+                    String.Format(
+                        "{0} - error: failed to remove review from index{1}",
+                        parsed.Identifier,
+                        FormatApiErrorSuffix(r)
+                    )
+                )
+                Return 1
             End If
 
             Dim result As ApiCallResult
@@ -113,6 +129,29 @@ Namespace InternetArchiveCli.Commands
                 Return False
             End If
             Return Convert.ToBoolean(body("success"), CultureInfo.InvariantCulture)
+        End Function
+
+        Private Shared Function FormatApiErrorSuffix(result As ApiCallResult) As String
+            If result Is Nothing Then
+                Return String.Empty
+            End If
+
+            If result.JsonBody IsNot Nothing AndAlso result.JsonBody.ContainsKey("error") Then
+                Dim err As String = Convert.ToString(result.JsonBody("error"), CultureInfo.InvariantCulture)
+                If Not String.IsNullOrWhiteSpace(err) Then
+                    Return ": " & err
+                End If
+            End If
+
+            If Not String.IsNullOrWhiteSpace(result.Text) Then
+                Return ": " & result.Text
+            End If
+
+            If result.StatusCode > 0 Then
+                Return String.Format(" (HTTP {0})", result.StatusCode)
+            End If
+
+            Return String.Empty
         End Function
 
         Private Shared Function ParseArguments(args As IList(Of String)) As ReviewsArgs
