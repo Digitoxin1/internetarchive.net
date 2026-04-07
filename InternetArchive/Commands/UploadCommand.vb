@@ -172,155 +172,7 @@ Namespace InternetArchiveCli.Commands
             Return If(errors, 1, 0)
         End Function
 
-        Private Shared Function BuildRemoteMd5Map(itemMetadata As Dictionary(Of String, Object)) As Dictionary(Of String, String)
-            Dim result As New Dictionary(Of String, String)(StringComparer.Ordinal)
-            For Each entry In ApiShared.GetArchiveFileEntries(itemMetadata)
-                Dim name As String = entry.Name
-                Dim md5 As String = entry.Md5
-                If name.Length > 0 AndAlso md5.Length > 0 Then
-                    result(name) = md5
-                End If
-            Next
-            Return result
-        End Function
-
-        Private Shared Function BuildUploadTargets(parsed As UploadArgs, stdinUpload As Boolean, fileMetadataEntries As List(Of Dictionary(Of String, Object))) As List(Of UploadTarget)
-            Dim targets As New List(Of UploadTarget)()
-
-            If stdinUpload Then
-                Dim bytes = ReadAllStdinBytes()
-                targets.Add(New UploadTarget With {
-                    .LocalPath = "",
-                    .RemoteName = parsed.RemoteName,
-                    .FileMetadata = Nothing,
-                    .ContentBytes = bytes
-                })
-                Return targets
-            End If
-
-            If fileMetadataEntries IsNot Nothing AndAlso fileMetadataEntries.Count > 0 Then
-                For Each entry In fileMetadataEntries
-                    Dim localPath As String = GetString(entry, "name")
-                    If String.IsNullOrWhiteSpace(localPath) Then
-                        Continue For
-                    End If
-                    Dim fileMetadata As New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
-                    For Each kvp In entry
-                        If String.Equals(kvp.Key, "name", StringComparison.OrdinalIgnoreCase) Then
-                            Continue For
-                        End If
-                        fileMetadata(kvp.Key) = kvp.Value
-                    Next
-                    Dim remoteName As String = Path.GetFileName(localPath)
-                    targets.Add(New UploadTarget With {
-                        .LocalPath = localPath,
-                        .RemoteName = remoteName,
-                        .FileMetadata = fileMetadata,
-                        .ContentBytes = Nothing
-                    })
-                Next
-                Return targets
-            End If
-
-            Dim expanded As New List(Of KeyValuePair(Of String, String))()
-            For Each inputPath In parsed.Files
-                If inputPath = "." Then
-                    For Each entry In Directory.EnumerateFiles(Directory.GetCurrentDirectory())
-                        expanded.Add(New KeyValuePair(Of String, String)(entry, ""))
-                    Next
-                    Continue For
-                End If
-                If Directory.Exists(inputPath) Then
-                    Dim fullBase As String = Path.GetFullPath(inputPath).TrimEnd("\"c, "/"c)
-                    Dim normalizedBase As String = fullBase.Replace("\"c, "/"c)
-                    For Each entry As String In Directory.EnumerateFiles(
-                        inputPath,
-                        "*",
-                        System.IO.SearchOption.AllDirectories
-                    )
-                        Dim fullEntry As String = Path.GetFullPath(entry)
-                        Dim relative As String
-                        If fullEntry.StartsWith(fullBase, StringComparison.OrdinalIgnoreCase) Then
-                            relative = fullEntry.Substring(fullBase.Length)
-                        Else
-                            relative = Path.GetFileName(fullEntry)
-                        End If
-                        relative = relative.TrimStart("\"c, "/"c)
-                        relative = relative.Replace("\"c, "/"c)
-                        Dim remoteOverride As String = normalizedBase & "/" & relative
-                        expanded.Add(New KeyValuePair(Of String, String)(entry, remoteOverride))
-                    Next
-                ElseIf File.Exists(inputPath) Then
-                    expanded.Add(New KeyValuePair(Of String, String)(inputPath, ""))
-                End If
-            Next
-
-            If parsed.RemoteName IsNot Nothing AndAlso expanded.Count > 0 Then
-                expanded = New List(Of KeyValuePair(Of String, String)) From {expanded(0)}
-            End If
-
-            For Each entry In expanded
-                Dim localPath As String = entry.Key
-                Dim remoteName As String
-                If Not String.IsNullOrWhiteSpace(parsed.RemoteName) Then
-                    remoteName = parsed.RemoteName
-                ElseIf Not String.IsNullOrWhiteSpace(entry.Value) Then
-                    remoteName = entry.Value
-                ElseIf parsed.KeepDirectories Then
-                    remoteName = localPath.Replace("\"c, "/"c)
-                Else
-                    remoteName = Path.GetFileName(localPath)
-                End If
-
-                targets.Add(New UploadTarget With {
-                    .LocalPath = localPath,
-                    .RemoteName = remoteName,
-                    .FileMetadata = Nothing,
-                    .ContentBytes = Nothing
-                })
-            Next
-
-            Return targets
-        End Function
-
-        Private Shared Sub CheckIfFileArgRequired(parsed As UploadArgs)
-            Dim requiredIfNoFile As Boolean =
-                Not String.IsNullOrWhiteSpace(parsed.SpreadsheetPath) OrElse
-                Not String.IsNullOrWhiteSpace(parsed.FileMetadataPath) OrElse
-                parsed.StatusCheck
-            If parsed.Files.Count = 0 AndAlso Not requiredIfNoFile Then
-                Throw New ArgumentException("You must specify a file to upload.")
-            End If
-        End Sub
-
-        Private Shared Function ComputeMd5(bytes As Byte()) As String
-            Using hasher As MD5 = MD5.Create()
-                Dim hash = hasher.ComputeHash(bytes)
-                Return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant()
-            End Using
-        End Function
-
-        Private Shared Function GetTargetContentBytes(target As UploadTarget) As Byte()
-            If target.ContentBytes IsNot Nothing Then
-                Return target.ContentBytes
-            End If
-            If String.IsNullOrWhiteSpace(target.LocalPath) Then
-                Return Array.Empty(Of Byte)()
-            End If
-            Return File.ReadAllBytes(target.LocalPath)
-        End Function
-
-        Private Shared Sub EnsureHasValue(args As IList(Of String), index As Integer, optionName As String)
-            If index >= args.Count Then
-                Throw New ArgumentException("Missing value for " & optionName)
-            End If
-        End Sub
-
-        Private Shared Function BuildProgressReporter(
-            remoteName As String,
-            totalBytes As Long,
-            verbose As Boolean
-        ) As Action(Of Long, Long)
+        Private Shared Function BuildProgressReporter(remoteName As String, totalBytes As Long, verbose As Boolean) As Action(Of Long, Long)
             If Not verbose Then
                 Return Nothing
             End If
@@ -500,56 +352,148 @@ Namespace InternetArchiveCli.Commands
                    End Sub
         End Function
 
-        Private Shared Function UseUnicodeProgressBar() As Boolean
-            Try
-                Dim forceAsciiRaw As String = Environment.GetEnvironmentVariable("IA_PROGRESS_ASCII")
-                If Not String.IsNullOrWhiteSpace(forceAsciiRaw) Then
-                    Dim normalized As String = forceAsciiRaw.Trim().ToLowerInvariant()
-                    If normalized = "1" OrElse normalized = "true" OrElse normalized = "yes" Then
-                        Return False
-                    End If
+        Private Shared Function BuildRemoteMd5Map(itemMetadata As Dictionary(Of String, Object)) As Dictionary(Of String, String)
+            Dim result As New Dictionary(Of String, String)(StringComparer.Ordinal)
+            For Each entry In ApiShared.GetArchiveFileEntries(itemMetadata)
+                Dim name As String = entry.Name
+                Dim md5 As String = entry.Md5
+                If name.Length > 0 AndAlso md5.Length > 0 Then
+                    result(name) = md5
                 End If
-
-                ' Match Python tqdm behavior: prefer unicode bars by default.
-                ' Keep ASCII available via IA_PROGRESS_ASCII=1 for legacy terminals.
-                Dim outputEncoding = Console.OutputEncoding
-                If outputEncoding Is Nothing Then
-                    Return False
-                End If
-                Return True
-            Catch
-                Return False
-            End Try
+            Next
+            Return result
         End Function
 
-        Private Shared Function FormatElapsed(elapsed As TimeSpan) As String
-            If elapsed.TotalHours >= 1.0R Then
-                Dim totalHours As Integer = CInt(Math.Floor(elapsed.TotalHours))
-                Return String.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0:00}:{1:00}:{2:00}",
-                    totalHours,
-                    elapsed.Minutes,
-                    elapsed.Seconds
-                )
+        Private Shared Function BuildUploadTargets(parsed As UploadArgs,
+                                                   stdinUpload As Boolean,
+                                                   fileMetadataEntries As List(Of Dictionary(Of String, Object))) As List(Of UploadTarget)
+            Dim targets As New List(Of UploadTarget)()
+
+            If stdinUpload Then
+                Dim bytes = ReadAllStdinBytes()
+                targets.Add(New UploadTarget With {
+                    .LocalPath = "",
+                    .RemoteName = parsed.RemoteName,
+                    .FileMetadata = Nothing,
+                    .ContentBytes = bytes
+                })
+                Return targets
             End If
 
-            Dim totalMinutes As Integer = CInt(Math.Floor(elapsed.TotalMinutes))
-            Return String.Format(
-                CultureInfo.InvariantCulture,
-                "{0:00}:{1:00}",
-                totalMinutes,
-                elapsed.Seconds
-            )
+            If fileMetadataEntries IsNot Nothing AndAlso fileMetadataEntries.Count > 0 Then
+                For Each entry In fileMetadataEntries
+                    Dim localPath As String = GetString(entry, "name")
+                    If String.IsNullOrWhiteSpace(localPath) Then
+                        Continue For
+                    End If
+                    Dim fileMetadata As New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
+                    For Each kvp In entry
+                        If String.Equals(kvp.Key, "name", StringComparison.OrdinalIgnoreCase) Then
+                            Continue For
+                        End If
+                        fileMetadata(kvp.Key) = kvp.Value
+                    Next
+                    Dim remoteName As String = Path.GetFileName(localPath)
+                    targets.Add(New UploadTarget With {
+                        .LocalPath = localPath,
+                        .RemoteName = remoteName,
+                        .FileMetadata = fileMetadata,
+                        .ContentBytes = Nothing
+                    })
+                Next
+                Return targets
+            End If
+
+            Dim expanded As New List(Of KeyValuePair(Of String, String))()
+            For Each inputPath In parsed.Files
+                If inputPath = "." Then
+                    For Each entry In Directory.EnumerateFiles(Directory.GetCurrentDirectory())
+                        expanded.Add(New KeyValuePair(Of String, String)(entry, ""))
+                    Next
+                    Continue For
+                End If
+                If Directory.Exists(inputPath) Then
+                    Dim fullBase As String = Path.GetFullPath(inputPath).TrimEnd("\"c, "/"c)
+                    Dim normalizedBase As String = fullBase.Replace("\"c, "/"c)
+                    For Each entry As String In Directory.EnumerateFiles(
+                        inputPath,
+                        "*",
+                        System.IO.SearchOption.AllDirectories
+                    )
+                        Dim fullEntry As String = Path.GetFullPath(entry)
+                        Dim relative As String
+                        If fullEntry.StartsWith(fullBase, StringComparison.OrdinalIgnoreCase) Then
+                            relative = fullEntry.Substring(fullBase.Length)
+                        Else
+                            relative = Path.GetFileName(fullEntry)
+                        End If
+                        relative = relative.TrimStart("\"c, "/"c)
+                        relative = relative.Replace("\"c, "/"c)
+                        Dim remoteOverride As String = normalizedBase & "/" & relative
+                        expanded.Add(New KeyValuePair(Of String, String)(entry, remoteOverride))
+                    Next
+                ElseIf File.Exists(inputPath) Then
+                    expanded.Add(New KeyValuePair(Of String, String)(inputPath, ""))
+                End If
+            Next
+
+            If parsed.RemoteName IsNot Nothing AndAlso expanded.Count > 0 Then
+                expanded = New List(Of KeyValuePair(Of String, String)) From {expanded(0)}
+            End If
+
+            For Each entry In expanded
+                Dim localPath As String = entry.Key
+                Dim remoteName As String
+                If Not String.IsNullOrWhiteSpace(parsed.RemoteName) Then
+                    remoteName = parsed.RemoteName
+                ElseIf Not String.IsNullOrWhiteSpace(entry.Value) Then
+                    remoteName = entry.Value
+                ElseIf parsed.KeepDirectories Then
+                    remoteName = localPath.Replace("\"c, "/"c)
+                Else
+                    remoteName = Path.GetFileName(localPath)
+                End If
+
+                targets.Add(New UploadTarget With {
+                    .LocalPath = localPath,
+                    .RemoteName = remoteName,
+                    .FileMetadata = Nothing,
+                    .ContentBytes = Nothing
+                })
+            Next
+
+            Return targets
         End Function
 
-        Private Shared Function ExecuteSpreadsheetUpload(
-            session As ArchiveSession,
-            parsed As UploadArgs,
-            headers As Dictionary(Of String, String),
-            queueDerive As Boolean,
-            verbose As Boolean
-        ) As Integer
+        Private Shared Sub CheckIfFileArgRequired(parsed As UploadArgs)
+            Dim requiredIfNoFile As Boolean =
+                Not String.IsNullOrWhiteSpace(parsed.SpreadsheetPath) OrElse
+                Not String.IsNullOrWhiteSpace(parsed.FileMetadataPath) OrElse
+                parsed.StatusCheck
+            If parsed.Files.Count = 0 AndAlso Not requiredIfNoFile Then
+                Throw New ArgumentException("You must specify a file to upload.")
+            End If
+        End Sub
+
+        Private Shared Function ComputeMd5(bytes As Byte()) As String
+            Using hasher As MD5 = MD5.Create()
+                Dim hash = hasher.ComputeHash(bytes)
+                Return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant()
+            End Using
+        End Function
+
+        Private Shared Sub EnsureHasValue(args As IList(Of String), index As Integer, optionName As String)
+            If index >= args.Count Then
+                Throw New ArgumentException("Missing value for " & optionName)
+            End If
+        End Sub
+
+        Private Shared Function ExecuteSpreadsheetUpload(session As ArchiveSession,
+                                                         parsed As UploadArgs,
+                                                         headers As Dictionary(Of String, String),
+                                                         queueDerive As Boolean,
+                                                         verbose As Boolean) As Integer
+
             Dim rows = ReadCsvRows(parsed.SpreadsheetPath)
             Dim errors As Boolean = False
             Dim prevIdentifier As String = Nothing
@@ -627,6 +571,19 @@ Namespace InternetArchiveCli.Commands
 
                 If verbose AndAlso Not String.Equals(prevIdentifier, identifier, StringComparison.Ordinal) Then
                     Console.Error.WriteLine(identifier & ":")
+                End If
+
+                If targets.Count = 0 Then
+                    Console.Error.WriteLine(
+                        String.Format(
+                            " error: file not found for identifier {0}: {1}",
+                            identifier,
+                            localFile
+                        )
+                    )
+                    errors = True
+                    prevIdentifier = identifier
+                    Continue For
                 End If
 
                 For Each target In targets
@@ -715,9 +672,7 @@ Namespace InternetArchiveCli.Commands
             Return If(errors, 1, 0)
         End Function
 
-        Private Shared Function ExtractMetadataEntries(
-            value As Object
-        ) As List(Of Dictionary(Of String, Object))
+        Private Shared Function ExtractMetadataEntries(value As Object) As List(Of Dictionary(Of String, Object))
             Dim result As New List(Of Dictionary(Of String, Object))()
             Dim objArr = TryCast(value, Object())
             If objArr IsNot Nothing Then
@@ -741,6 +696,27 @@ Namespace InternetArchiveCli.Commands
             Return result
         End Function
 
+        Private Shared Function FormatElapsed(elapsed As TimeSpan) As String
+            If elapsed.TotalHours >= 1.0R Then
+                Dim totalHours As Integer = CInt(Math.Floor(elapsed.TotalHours))
+                Return String.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0:00}:{1:00}:{2:00}",
+                    totalHours,
+                    elapsed.Minutes,
+                    elapsed.Seconds
+                )
+            End If
+
+            Dim totalMinutes As Integer = CInt(Math.Floor(elapsed.TotalMinutes))
+            Return String.Format(
+                CultureInfo.InvariantCulture,
+                "{0:00}:{1:00}",
+                totalMinutes,
+                elapsed.Seconds
+            )
+        End Function
+
         Private Shared Function GetString(dict As Dictionary(Of String, Object), key As String) As String
             If dict IsNot Nothing AndAlso dict.ContainsKey(key) Then
                 Return Convert.ToString(dict(key), CultureInfo.InvariantCulture)
@@ -748,6 +724,15 @@ Namespace InternetArchiveCli.Commands
             Return ""
         End Function
 
+        Private Shared Function GetTargetContentBytes(target As UploadTarget) As Byte()
+            If target.ContentBytes IsNot Nothing Then
+                Return target.ContentBytes
+            End If
+            If String.IsNullOrWhiteSpace(target.LocalPath) Then
+                Return Array.Empty(Of Byte)()
+            End If
+            Return File.ReadAllBytes(target.LocalPath)
+        End Function
         Private Shared Function IsUploadingFromStdin(parsed As UploadArgs) As Boolean
             Return parsed.Files.Count = 1 AndAlso parsed.Files(0) = "-"
         End Function
@@ -756,9 +741,7 @@ Namespace InternetArchiveCli.Commands
             Return Regex.IsMatch(name, "^[A-Za-z][.\-0-9A-Za-z_]+(?:\[[0-9]+\])?$")
         End Function
 
-        Private Shared Function LoadFileMetadataEntries(
-            fileMetadataPath As String
-        ) As List(Of Dictionary(Of String, Object))
+        Private Shared Function LoadFileMetadataEntries(fileMetadataPath As String) As List(Of Dictionary(Of String, Object))
             If String.IsNullOrWhiteSpace(fileMetadataPath) Then
                 Return Nothing
             End If
@@ -789,11 +772,7 @@ Namespace InternetArchiveCli.Commands
             Return jsonlEntries
         End Function
 
-        Private Shared Sub MergeMetadata(
-            destination As Dictionary(Of String, Object),
-            raw As String,
-            optionName As String
-        )
+        Private Shared Sub MergeMetadata(destination As Dictionary(Of String, Object), raw As String, optionName As String)
             Dim normalized As String = raw
             If normalized.IndexOf(":"c) < 0 AndAlso normalized.IndexOf("="c) >= 0 Then
                 Dim firstEq As Integer = normalized.IndexOf("="c)
@@ -814,11 +793,7 @@ Namespace InternetArchiveCli.Commands
             End If
         End Sub
 
-        Private Shared Sub MergeQueryString(
-            destination As Dictionary(Of String, Object),
-            raw As String,
-            optionName As String
-        )
+        Private Shared Sub MergeQueryString(destination As Dictionary(Of String, Object), raw As String, optionName As String)
             Dim normalized As String = raw
             If normalized.IndexOf("="c) < 0 AndAlso normalized.IndexOf(":"c) >= 0 Then
                 Dim firstColon As Integer = normalized.IndexOf(":"c)
@@ -910,6 +885,7 @@ Namespace InternetArchiveCli.Commands
             If unknown.Count > 0 Then
                 Throw New ArgumentException("unrecognized arguments: " & String.Join(" ", unknown))
             End If
+
             Return parsed
         End Function
 
@@ -917,10 +893,12 @@ Namespace InternetArchiveCli.Commands
             If String.IsNullOrWhiteSpace(response.RequestUrl) Then
                 Return
             End If
+
             Console.Error.WriteLine("Endpoint:")
             Console.Error.WriteLine(" " & response.RequestUrl)
             Console.Error.WriteLine()
             Console.Error.WriteLine("HTTP Headers:")
+
             If response.Headers IsNot Nothing Then
                 For Each kvp In response.Headers
                     Console.Error.WriteLine(" " & kvp.Key & ":" & kvp.Value)
@@ -954,6 +932,7 @@ Namespace InternetArchiveCli.Commands
 
         Private Shared Function ReadCsvRows(path As String) As List(Of Dictionary(Of String, String))
             Dim rows As New List(Of Dictionary(Of String, String))()
+
             Using parser As New TextFieldParser(path, System.Text.Encoding.UTF8)
                 parser.SetDelimiters(",")
                 parser.HasFieldsEnclosedInQuotes = True
@@ -982,9 +961,31 @@ Namespace InternetArchiveCli.Commands
                     rows.Add(row)
                 End While
             End Using
+
             Return rows
         End Function
 
+        Private Shared Function UseUnicodeProgressBar() As Boolean
+            Try
+                Dim forceAsciiRaw As String = Environment.GetEnvironmentVariable("IA_PROGRESS_ASCII")
+                If Not String.IsNullOrWhiteSpace(forceAsciiRaw) Then
+                    Dim normalized As String = forceAsciiRaw.Trim().ToLowerInvariant()
+                    If normalized = "1" OrElse normalized = "true" OrElse normalized = "yes" Then
+                        Return False
+                    End If
+                End If
+
+                ' Match Python tqdm behavior: prefer unicode bars by default.
+                ' Keep ASCII available via IA_PROGRESS_ASCII=1 for legacy terminals.
+                Dim outputEncoding = Console.OutputEncoding
+                If outputEncoding Is Nothing Then
+                    Return False
+                End If
+                Return True
+            Catch
+                Return False
+            End Try
+        End Function
         Private NotInheritable Class UploadArgs
             Public Property Checksum As Boolean
             Public Property Debug As Boolean
