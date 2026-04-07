@@ -38,6 +38,10 @@ Namespace InternetArchiveCli.Commands
             End If
 
             Dim hasErrors As Boolean = False
+            Dim checksumArchiveEntries As HashSet(Of String) = Nothing
+            If parsed.ChecksumArchive Then
+                checksumArchiveEntries = LoadChecksumArchiveEntries("_checksum_archive.txt")
+            End If
             For i As Integer = 0 To ids.Count - 1
                 Dim identifier As String = ids(i)
                 Dim itemMetadata As Dictionary(Of String, Object)
@@ -112,7 +116,7 @@ Namespace InternetArchiveCli.Commands
                         Continue For
                     End If
 
-                    If ShouldSkipExisting(destinationPath, fileEntry, parsed) Then
+                    If ShouldSkipExisting(destinationPath, fileEntry, parsed, checksumArchiveEntries) Then
                         Continue For
                     End If
 
@@ -756,7 +760,21 @@ Namespace InternetArchiveCli.Commands
             Return ids
         End Function
 
-        Private Shared Function ShouldSkipExisting(destinationPath As String, fileEntry As ArchiveFileEntry, parsed As DownloadArgs) As Boolean
+        Private Shared Function LoadChecksumArchiveEntries(archiveFile As String) As HashSet(Of String)
+            Dim entries As New HashSet(Of String)(StringComparer.Ordinal)
+            If Not File.Exists(archiveFile) Then
+                Return entries
+            End If
+
+            For Each line In File.ReadLines(archiveFile)
+                If line.Length > 0 Then
+                    entries.Add(line)
+                End If
+            Next
+            Return entries
+        End Function
+
+        Private Shared Function ShouldSkipExisting(destinationPath As String, fileEntry As ArchiveFileEntry, parsed As DownloadArgs, checksumArchiveEntries As HashSet(Of String)) As Boolean
             If parsed.StdoutOutput Then
                 Return False
             End If
@@ -765,15 +783,11 @@ Namespace InternetArchiveCli.Commands
             End If
 
             If parsed.ChecksumArchive Then
-                Dim archiveFile As String = "_checksum_archive.txt"
-                If File.Exists(archiveFile) Then
-                    Dim lines = New HashSet(Of String)(File.ReadLines(archiveFile), StringComparer.Ordinal)
-                    If lines.Contains(destinationPath) Then
-                        If Not parsed.Quiet Then
-                            Console.Error.WriteLine(" skipping " & destinationPath & ", file already exists based on checksum_archive.")
-                        End If
-                        Return True
+                If checksumArchiveEntries IsNot Nothing AndAlso checksumArchiveEntries.Contains(destinationPath) Then
+                    If Not parsed.Quiet Then
+                        Console.Error.WriteLine(" skipping " & destinationPath & ", file already exists based on checksum_archive.")
                     End If
+                    Return True
                 End If
             End If
 
@@ -793,7 +807,9 @@ Namespace InternetArchiveCli.Commands
                             Console.Error.WriteLine(" skipping " & destinationPath & ", file already exists based on checksum.")
                         End If
                         If parsed.ChecksumArchive Then
-                            File.AppendAllText("_checksum_archive.txt", destinationPath & Environment.NewLine)
+                            If checksumArchiveEntries Is Nothing OrElse checksumArchiveEntries.Add(destinationPath) Then
+                                File.AppendAllText("_checksum_archive.txt", destinationPath & Environment.NewLine)
+                            End If
                         End If
                         Return True
                     End If
