@@ -28,6 +28,10 @@ Namespace InternetArchiveCli.Commands
 
             If Not String.IsNullOrWhiteSpace(parsed.AddFlag) Then
                 Dim result = session.AddFlag(parsed.Identifier, parsed.AddFlag, flagUser)
+                If result.StatusCode >= 400 Then
+                    Console.Error.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, DescribeApiFailure(result)))
+                    Return 1
+                End If
                 Dim status As String = GetResultStatus(result)
                 If String.Equals(status, "success", StringComparison.OrdinalIgnoreCase) Then
                     Console.WriteLine(
@@ -40,12 +44,16 @@ Namespace InternetArchiveCli.Commands
                     )
                     Return 0
                 End If
-                Console.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, result.Text))
+                Console.Error.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, DescribeApiFailure(result)))
                 Return 1
             End If
 
             If Not String.IsNullOrWhiteSpace(parsed.DeleteFlag) Then
                 Dim result = session.DeleteFlag(parsed.Identifier, parsed.DeleteFlag, flagUser)
+                If result.StatusCode >= 400 Then
+                    Console.Error.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, DescribeApiFailure(result)))
+                    Return 1
+                End If
                 Dim status As String = GetResultStatus(result)
                 If String.Equals(status, "success", StringComparison.OrdinalIgnoreCase) Then
                     Console.WriteLine(
@@ -58,11 +66,15 @@ Namespace InternetArchiveCli.Commands
                     )
                     Return 0
                 End If
-                Console.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, result.Text))
+                Console.Error.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, DescribeApiFailure(result)))
                 Return 1
             End If
 
             Dim flags = session.GetFlags(parsed.Identifier)
+            If flags.StatusCode >= 400 Then
+                Console.Error.WriteLine(String.Format("error: {0} - {1}", parsed.Identifier, DescribeApiFailure(flags)))
+                Return 1
+            End If
             Console.WriteLine(flags.Text)
             Return 0
         End Function
@@ -78,6 +90,29 @@ Namespace InternetArchiveCli.Commands
                 Return Convert.ToString(result.JsonBody("status"), CultureInfo.InvariantCulture)
             End If
             Return ""
+        End Function
+
+        Private Shared Function DescribeApiFailure(result As ApiCallResult) As String
+            If result Is Nothing Then
+                Return "request failed"
+            End If
+
+            If result.JsonBody IsNot Nothing AndAlso result.JsonBody.ContainsKey("error") Then
+                Dim errorText As String = Convert.ToString(result.JsonBody("error"), CultureInfo.InvariantCulture)
+                If Not String.IsNullOrWhiteSpace(errorText) Then
+                    Return errorText
+                End If
+            End If
+
+            If Not String.IsNullOrWhiteSpace(result.Text) Then
+                Return result.Text
+            End If
+
+            If result.StatusCode > 0 Then
+                Return String.Format("HTTP {0}", result.StatusCode)
+            End If
+
+            Return "request failed"
         End Function
 
         Private Shared Function GetScreenname(session As ArchiveSession) As String

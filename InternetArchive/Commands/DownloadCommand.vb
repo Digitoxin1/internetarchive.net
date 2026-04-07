@@ -4,6 +4,7 @@ Imports System.Net.Http
 Imports System.Security.Cryptography
 Imports System.Text.RegularExpressions
 Imports InternetArchive.InternetArchiveCli.Core
+Imports InternetArchive.InternetArchiveCli.Exceptions
 
 Namespace InternetArchiveCli.Commands
     Public NotInheritable Class DownloadCommand
@@ -24,7 +25,16 @@ Namespace InternetArchiveCli.Commands
                 Return 2
             End Try
 
-            Dim ids As List(Of String) = ResolveIdentifiers(session, parsed)
+            Dim ids As List(Of String)
+            Try
+                ids = ResolveIdentifiers(session, parsed)
+            Catch ex As AuthenticationError
+                Console.Error.WriteLine("error: " & ex.Message)
+                Return 1
+            Catch ex As Exception
+                Console.Error.WriteLine("error: " & ex.Message)
+                Return 1
+            End Try
             If ids.Count = 0 Then
                 If Not String.IsNullOrWhiteSpace(parsed.SearchQuery) Then
                     Console.Error.WriteLine(
@@ -52,6 +62,9 @@ Namespace InternetArchiveCli.Commands
                     Dim itemMetadata As Dictionary(Of String, Object)
                     Try
                         itemMetadata = session.GetItemMetadata(identifier, Nothing)
+                    Catch ex As AuthenticationError
+                        Console.Error.WriteLine(identifier & ": " & ex.Message)
+                        Return 1
                     Catch ex As Exception
                         Console.Error.WriteLine(identifier & ": failed to retrieve item metadata - " & ex.Message)
                         If ex.Message.IndexOf("You are attempting to make an HTTPS", StringComparison.Ordinal) >= 0 Then

@@ -1,5 +1,6 @@
 Imports System.Web.Script.Serialization
 Imports InternetArchive.InternetArchiveCli.Core
+Imports InternetArchive.InternetArchiveCli.Exceptions
 
 Namespace InternetArchiveCli.Commands
     Public NotInheritable Class SimplelistsCommand
@@ -22,23 +23,39 @@ Namespace InternetArchiveCli.Commands
             End If
 
             If parsed.ListParents Then
-                Dim item = session.GetItemMetadata(parsed.Identifier, Nothing)
-                Dim simplelistsObj As Object = Nothing
-                If item.TryGetValue("simplelists", simplelistsObj) AndAlso simplelistsObj IsNot Nothing Then
-                    Console.WriteLine(serializer.Serialize(simplelistsObj))
-                End If
-                Return 0
+                Try
+                    Dim item = session.GetItemMetadata(parsed.Identifier, Nothing)
+                    Dim simplelistsObj As Object = Nothing
+                    If item.TryGetValue("simplelists", simplelistsObj) AndAlso simplelistsObj IsNot Nothing Then
+                        Console.WriteLine(serializer.Serialize(simplelistsObj))
+                    End If
+                    Return 0
+                Catch ex As AuthenticationError
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
+                Catch ex As Exception
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
+                End Try
             End If
 
             If parsed.ListChildren Then
-                Dim listName As String = If(String.IsNullOrWhiteSpace(parsed.ListName), "catchall", parsed.ListName)
-                Dim queryIdentifier As String = If(String.IsNullOrWhiteSpace(parsed.Identifier), "*", parsed.Identifier)
-                Dim query As String = String.Format("simplelists__{0}:{1}", listName, queryIdentifier)
-                Dim results = session.SearchItemsSimple(query, Nothing)
-                For Each result In results
-                    Console.WriteLine(serializer.Serialize(result))
-                Next
-                Return 0
+                Try
+                    Dim listName As String = If(String.IsNullOrWhiteSpace(parsed.ListName), "catchall", parsed.ListName)
+                    Dim queryIdentifier As String = If(String.IsNullOrWhiteSpace(parsed.Identifier), "*", parsed.Identifier)
+                    Dim query As String = String.Format("simplelists__{0}:{1}", listName, queryIdentifier)
+                    Dim results = session.SearchItemsSimple(query, Nothing)
+                    For Each result In results
+                        Console.WriteLine(serializer.Serialize(result))
+                    Next
+                    Return 0
+                Catch ex As AuthenticationError
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
+                Catch ex As Exception
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
+                End Try
             End If
 
             If Not String.IsNullOrWhiteSpace(parsed.SetParent) Then

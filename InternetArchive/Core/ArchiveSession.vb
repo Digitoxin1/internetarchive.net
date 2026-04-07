@@ -3,6 +3,7 @@ Imports System.Net
 Imports System.Net.Http
 Imports System.Text
 Imports System.Web.Script.Serialization
+Imports InternetArchive.InternetArchiveCli.Exceptions
 
 Namespace InternetArchiveCli.Core
     Public Class ArchiveSession
@@ -215,11 +216,33 @@ Namespace InternetArchiveCli.Core
                 Using request As New HttpRequestMessage(HttpMethod.Get, url)
                     Using response As HttpResponseMessage = client.SendAsync(request).GetAwaiter().GetResult()
                         Dim content As String = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                        If response.StatusCode = HttpStatusCode.NotFound Then
+                            Return New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
+                        End If
+                        If response.StatusCode = HttpStatusCode.Unauthorized OrElse
+                           response.StatusCode = HttpStatusCode.Forbidden Then
+                            Throw New AuthenticationError(String.Format(
+                                "HTTP {0} while getting metadata for '{1}'.",
+                                CInt(response.StatusCode),
+                                identifier
+                            ))
+                        End If
+                        If CInt(response.StatusCode) >= 400 Then
+                            Throw New InvalidOperationException(String.Format(
+                                "HTTP {0} while getting metadata for '{1}'.",
+                                CInt(response.StatusCode),
+                                identifier
+                            ))
+                        End If
+
                         Dim serializer As New JavaScriptSerializer()
                         Dim result = serializer.DeserializeObject(content)
                         Dim asDict = TryCast(result, Dictionary(Of String, Object))
                         If asDict Is Nothing Then
-                            Return New Dictionary(Of String, Object)(StringComparer.OrdinalIgnoreCase)
+                            Throw New InvalidOperationException(String.Format(
+                                "Unexpected metadata response format for '{0}'.",
+                                identifier
+                            ))
                         End If
                         Return asDict
                     End Using
@@ -643,15 +666,27 @@ Namespace InternetArchiveCli.Core
                         AddS3AuthHeader(request)
                         Using response As HttpResponseMessage = client.SendAsync(request).GetAwaiter().GetResult()
                             Dim text = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                            If response.StatusCode = HttpStatusCode.Unauthorized OrElse
+                               response.StatusCode = HttpStatusCode.Forbidden Then
+                                Throw New AuthenticationError(String.Format(
+                                    "HTTP {0} while searching items.",
+                                    CInt(response.StatusCode)
+                                ))
+                            End If
+                            If CInt(response.StatusCode) >= 400 Then
+                                Throw New InvalidOperationException(String.Format(
+                                    "HTTP {0} while searching items.",
+                                    CInt(response.StatusCode)
+                                ))
+                            End If
 
                             Dim payload = serializer.DeserializeObject(text)
                             Dim json = TryCast(payload, Dictionary(Of String, Object))
                             If json Is Nothing Then
-                                Return results
+                                Throw New InvalidOperationException("Unexpected search response format.")
                             End If
                             If json.ContainsKey("error") Then
-                                results.Add(json)
-                                Return results
+                                Throw New InvalidOperationException(Convert.ToString(json("error"), CultureInfo.InvariantCulture))
                             End If
 
                             Dim itemsObj As Object = Nothing

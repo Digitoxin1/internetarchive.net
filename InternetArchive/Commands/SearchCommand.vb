@@ -92,6 +92,9 @@ Namespace InternetArchiveCli.Commands
                 Catch ex As AuthenticationError
                     Console.Error.WriteLine("error: " & ex.Message)
                     Return 1
+                Catch ex As InvalidOperationException
+                    Console.Error.WriteLine("error: " & ex.Message)
+                    Return 1
                 Catch ex As TaskCanceledException
                     Console.Error.WriteLine(
                         "error: Request timed out. Increase the --timeout and try again."
@@ -718,11 +721,25 @@ Namespace InternetArchiveCli.Commands
 
                 Using response = client.SendAsync(request).GetAwaiter().GetResult()
                     Dim payload As String = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                    Dim statusCode As Integer = CInt(response.StatusCode)
+                    If statusCode = 401 OrElse statusCode = 403 Then
+                        Throw New AuthenticationError(String.Format(
+                            "HTTP {0} while calling search endpoint.",
+                            statusCode
+                        ))
+                    End If
+                    If statusCode >= 400 Then
+                        Throw New InvalidOperationException(String.Format(
+                            "HTTP {0} while calling search endpoint.",
+                            statusCode
+                        ))
+                    End If
+
                     Dim serializer As New JavaScriptSerializer()
                     Dim decoded = serializer.DeserializeObject(payload)
                     Dim result = TryCast(decoded, Dictionary(Of String, Object))
                     If result Is Nothing Then
-                        Return New Dictionary(Of String, Object)()
+                        Throw New InvalidOperationException("Unexpected search response format.")
                     End If
                     Return result
                 End Using
