@@ -74,7 +74,7 @@ Namespace InternetArchiveCli.Core
                                      fileMetadata As Dictionary(Of String, Object),
                                      queueDerive As Boolean) As ApiCallResult
 
-            Dim destinationEncoded As String = EscapePathKeepSlash(destination)
+            Dim destinationEncoded As String = ApiShared.EscapeArchivePath(destination)
             Dim url As String = String.Format(
                 "{0}//s3.us.archive.org/{1}",
                 Protocol,
@@ -152,14 +152,8 @@ Namespace InternetArchiveCli.Core
         End Function
 
         Public Function DeleteS3File(identifier As String, fileName As String, headers As Dictionary(Of String, String), retries As Integer) As ApiCallResult
-            Dim encodedName As String = Uri.EscapeDataString(fileName)
-
-            Dim url As String = String.Format(
-                "{0}//s3.us.archive.org/{1}/{2}",
-                Protocol,
-                identifier,
-                encodedName
-            )
+            Dim encodedPath As String = ApiShared.EscapeArchivePath(identifier & "/" & fileName)
+            Dim url As String = String.Format("{0}//s3.us.archive.org/{1}", Protocol, encodedPath)
 
             Dim attempts As Integer = Math.Max(0, retries) + 1
             Dim lastResult As ApiCallResult = Nothing
@@ -212,7 +206,8 @@ Namespace InternetArchiveCli.Core
         End Function
 
         Public Function GetItemMetadata(identifier As String, params As Dictionary(Of String, Object)) As Dictionary(Of String, Object)
-            Dim baseUrl As String = String.Format("{0}//{1}/metadata/{2}", Protocol, Host, identifier)
+            Dim normalizedIdentifier As String = ApiShared.EscapeArchivePath(identifier)
+            Dim baseUrl As String = String.Format("{0}//{1}/metadata/{2}", Protocol, Host, normalizedIdentifier)
             Dim url As String = BuildUrl(baseUrl, params)
             Using client As New HttpClient()
                 Using request As New HttpRequestMessage(HttpMethod.Get, url)
@@ -470,7 +465,8 @@ Namespace InternetArchiveCli.Core
                                           reducedPriority As Boolean,
                                           timeoutSeconds As Double) As MetadataWriteResult
 
-            Dim url As String = String.Format("{0}//{1}/metadata/{2}", Protocol, Host, identifier)
+            Dim normalizedIdentifier As String = ApiShared.EscapeArchivePath(identifier)
+            Dim url As String = String.Format("{0}//{1}/metadata/{2}", Protocol, Host, normalizedIdentifier)
             Using client As New HttpClient()
                 client.Timeout = TimeSpan.FromSeconds(timeoutSeconds)
                 Using request As New HttpRequestMessage(HttpMethod.Post, url)
@@ -512,11 +508,12 @@ Namespace InternetArchiveCli.Core
         End Function
 
         Public Function PostSimplelistPatch(identifier As String, patch As Dictionary(Of String, Object)) As ApiCallResult
+            Dim normalizedIdentifier As String = ApiShared.EscapeArchivePath(identifier)
             Dim url As String = String.Format(
                 "{0}//{1}/metadata/{2}",
                 Protocol,
                 Host,
-                identifier
+                normalizedIdentifier
             )
             Using client As New HttpClient()
                 Using request As New HttpRequestMessage(HttpMethod.Post, url)
@@ -549,10 +546,11 @@ Namespace InternetArchiveCli.Core
 
         Public Function S3IsOverloaded(identifier As String) As Boolean
             Dim url As String = String.Format("{0}//s3.us.archive.org", Protocol)
+            Dim normalizedIdentifier As String = ApiShared.NormalizeArchivePath(identifier)
             Dim params As New Dictionary(Of String, Object) From {
                 {"check_limit", 1},
                 {"accesskey", AccessKey},
-                {"bucket", identifier}
+                {"bucket", normalizedIdentifier}
             }
             Using client As New HttpClient()
                 client.Timeout = TimeSpan.FromSeconds(12)
@@ -722,7 +720,7 @@ Namespace InternetArchiveCli.Core
                                      Optional progressCallback As Action(Of Long, Long) = Nothing) As ApiCallResult
 
             Dim remotePath As String = identifier & "/" & remoteName
-            Dim encodedPath As String = EscapePathKeepSlash(remotePath)
+            Dim encodedPath As String = ApiShared.EscapeArchivePath(remotePath)
             Dim url As String = String.Format("{0}//s3.us.archive.org/{1}", Protocol, encodedPath)
 
             Dim requestHeaders As New Dictionary(Of String, String)(StringComparer.OrdinalIgnoreCase)
@@ -891,17 +889,6 @@ Namespace InternetArchiveCli.Core
             Dim da As DateTime = ParseSubmitTime(a)
             Dim db As DateTime = ParseSubmitTime(b)
             Return db.CompareTo(da)
-        End Function
-
-        Private Shared Function EscapePathKeepSlash(path As String) As String
-            If String.IsNullOrEmpty(path) Then
-                Return path
-            End If
-            Dim parts = path.Split("/"c)
-            For i As Integer = 0 To parts.Length - 1
-                parts(i) = Uri.EscapeDataString(parts(i))
-            Next
-            Return String.Join("/", parts)
         End Function
 
         Private Shared Function GetSection(config As Dictionary(Of String, Dictionary(Of String, String)), name As String) As Dictionary(Of String, String)

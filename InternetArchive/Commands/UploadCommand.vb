@@ -373,7 +373,7 @@ Namespace InternetArchiveCli.Commands
                 Dim bytes = ReadAllStdinBytes()
                 targets.Add(New UploadTarget With {
                     .LocalPath = "",
-                    .RemoteName = parsed.RemoteName,
+                    .RemoteName = ApiShared.NormalizeArchivePath(parsed.RemoteName),
                     .FileMetadata = Nothing,
                     .ContentBytes = bytes
                 })
@@ -382,7 +382,7 @@ Namespace InternetArchiveCli.Commands
 
             If fileMetadataEntries IsNot Nothing AndAlso fileMetadataEntries.Count > 0 Then
                 For Each entry In fileMetadataEntries
-                    Dim localPath As String = GetString(entry, "name")
+                    Dim localPath As String = NormalizeLocalInputPath(GetString(entry, "name"))
                     If String.IsNullOrWhiteSpace(localPath) Then
                         Continue For
                     End If
@@ -413,23 +413,19 @@ Namespace InternetArchiveCli.Commands
                     Continue For
                 End If
                 If Directory.Exists(inputPath) Then
-                    Dim fullBase As String = Path.GetFullPath(inputPath).TrimEnd("\"c, "/"c)
-                    Dim normalizedBase As String = fullBase.Replace("\"c, "/"c)
+                    Dim fullBase As String =
+                        Path.GetFullPath(inputPath).
+                            TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    Dim baseUri As New Uri(AppendDirectorySeparator(fullBase), UriKind.Absolute)
                     For Each entry As String In Directory.EnumerateFiles(
                         inputPath,
                         "*",
                         System.IO.SearchOption.AllDirectories
                     )
                         Dim fullEntry As String = Path.GetFullPath(entry)
-                        Dim relative As String
-                        If fullEntry.StartsWith(fullBase, StringComparison.OrdinalIgnoreCase) Then
-                            relative = fullEntry.Substring(fullBase.Length)
-                        Else
-                            relative = Path.GetFileName(fullEntry)
-                        End If
-                        relative = relative.TrimStart("\"c, "/"c)
-                        relative = relative.Replace("\"c, "/"c)
-                        Dim remoteOverride As String = normalizedBase & "/" & relative
+                        Dim relativeUri As Uri = baseUri.MakeRelativeUri(New Uri(fullEntry, UriKind.Absolute))
+                        Dim relativeLocal As String = ToLocalRelativePath(Uri.UnescapeDataString(relativeUri.ToString()))
+                        Dim remoteOverride As String = ApiShared.NormalizeArchivePath(Path.Combine(fullBase, relativeLocal))
                         expanded.Add(New KeyValuePair(Of String, String)(entry, remoteOverride))
                     Next
                 ElseIf File.Exists(inputPath) Then
@@ -445,13 +441,13 @@ Namespace InternetArchiveCli.Commands
                 Dim localPath As String = entry.Key
                 Dim remoteName As String
                 If Not String.IsNullOrWhiteSpace(parsed.RemoteName) Then
-                    remoteName = parsed.RemoteName
+                    remoteName = ApiShared.NormalizeArchivePath(parsed.RemoteName)
                 ElseIf Not String.IsNullOrWhiteSpace(entry.Value) Then
-                    remoteName = entry.Value
+                    remoteName = ApiShared.NormalizeArchivePath(entry.Value)
                 ElseIf parsed.KeepDirectories Then
-                    remoteName = localPath.Replace("\"c, "/"c)
+                    remoteName = ApiShared.NormalizeArchivePath(localPath)
                 Else
-                    remoteName = Path.GetFileName(localPath)
+                    remoteName = ApiShared.NormalizeArchivePath(Path.GetFileName(localPath))
                 End If
 
                 targets.Add(New UploadTarget With {
@@ -463,6 +459,39 @@ Namespace InternetArchiveCli.Commands
             Next
 
             Return targets
+        End Function
+
+        Private Shared Function AppendDirectorySeparator(fullPath As String) As String
+            If fullPath.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal) OrElse
+               fullPath.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal) Then
+                Return fullPath
+            End If
+            Return fullPath & Path.DirectorySeparatorChar
+        End Function
+
+        Private Shared Function NormalizeLocalInputPath(pathValue As String) As String
+            If String.IsNullOrWhiteSpace(pathValue) OrElse String.Equals(pathValue, "-", StringComparison.Ordinal) Then
+                Return pathValue
+            End If
+            Return Path.GetFullPath(pathValue)
+        End Function
+
+        Private Shared Function ToLocalRelativePath(uriRelativePath As String) As String
+            Dim trimmed As String = uriRelativePath.TrimStart("/"c)
+            If trimmed.Length = 0 Then
+                Return String.Empty
+            End If
+
+            Dim segments = trimmed.Split(New Char() {"/"c}, StringSplitOptions.RemoveEmptyEntries)
+            If segments.Length = 0 Then
+                Return String.Empty
+            End If
+
+            Dim localPath As String = segments(0)
+            For i As Integer = 1 To segments.Length - 1
+                localPath = Path.Combine(localPath, segments(i))
+            Next
+            Return localPath
         End Function
 
         Private Shared Sub CheckIfFileArgRequired(parsed As UploadArgs)
@@ -525,7 +554,7 @@ Namespace InternetArchiveCli.Commands
 
                 Dim localFile As String = ""
                 If row.ContainsKey("file") Then
-                    localFile = row("file")
+                    localFile = NormalizeLocalInputPath(row("file"))
                 End If
                 If String.IsNullOrWhiteSpace(localFile) Then
                     Console.Error.WriteLine("error: no file column on spreadsheet.")
@@ -839,10 +868,10 @@ Namespace InternetArchiveCli.Commands
                         MergeMetadata(parsed.Metadata, args(i), current)
                     Case "--spreadsheet"
                         i += 1 : EnsureHasValue(args, i, current)
-                        parsed.SpreadsheetPath = args(i)
+                        parsed.SpreadsheetPath = NormalizeLocalInputPath(args(i))
                     Case "--file-metadata"
                         i += 1 : EnsureHasValue(args, i, current)
-                        parsed.FileMetadataPath = args(i)
+                        parsed.FileMetadataPath = NormalizeLocalInputPath(args(i))
                     Case "-H", "--header"
                         i += 1 : EnsureHasValue(args, i, current)
                         MergeQueryString(parsed.Headers, args(i), current)
@@ -873,10 +902,11 @@ Namespace InternetArchiveCli.Commands
                         If String.IsNullOrWhiteSpace(parsed.Identifier) Then
                             parsed.Identifier = current
                         Else
-                            If current <> "-" AndAlso Not File.Exists(current) AndAlso Not Directory.Exists(current) Then
+                            Dim localInput As String = NormalizeLocalInputPath(current)
+                            If localInput <> "-" AndAlso Not File.Exists(localInput) AndAlso Not Directory.Exists(localInput) Then
                                 Throw New ArgumentException("'" & current & "' is not a valid file or directory")
                             End If
-                            parsed.Files.Add(current)
+                            parsed.Files.Add(localInput)
                         End If
                 End Select
                 i += 1

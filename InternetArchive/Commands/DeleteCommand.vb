@@ -144,13 +144,13 @@ Namespace InternetArchiveCli.Commands
                     End If
                     Dim trimmed As String = line.Trim()
                     If trimmed.Length > 0 Then
-                        names.Add(trimmed)
+                        names.Add(ApiShared.NormalizeArchivePath(trimmed))
                     End If
                 End While
             Else
                 names = New List(Of String)(parsed.Files)
                 For i As Integer = 0 To names.Count - 1
-                    names(i) = names(i).Trim()
+                    names(i) = ApiShared.NormalizeArchivePath(names(i).Trim())
                 Next
             End If
 

@@ -7,6 +7,28 @@ Namespace InternetArchiveCli.Core
         Private Sub New()
         End Sub
 
+        Friend Shared Function NormalizeArchivePath(path As String) As String
+            If String.IsNullOrEmpty(path) Then
+                Return path
+            End If
+
+            Return path.Replace("\"c, "/"c)
+        End Function
+
+        Friend Shared Function EscapeArchivePath(path As String) As String
+            Dim normalized As String = NormalizeArchivePath(path)
+            If String.IsNullOrEmpty(normalized) Then
+                Return normalized
+            End If
+
+            Dim parts = normalized.Split("/"c)
+            For i As Integer = 0 To parts.Length - 1
+                parts(i) = Uri.EscapeDataString(parts(i))
+            Next
+
+            Return String.Join("/", parts)
+        End Function
+
         Friend Shared Sub ApplyLowAuth(request As HttpRequestMessage, accessKey As String, secretKey As String)
             If request Is Nothing Then
                 Return

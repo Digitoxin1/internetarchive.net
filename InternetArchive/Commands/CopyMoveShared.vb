@@ -6,14 +6,6 @@ Namespace InternetArchiveCli.Commands
         Private Sub New()
         End Sub
 
-        Friend Shared Function EscapePathKeepSlash(path As String) As String
-            Dim parts = path.Split("/"c)
-            For i As Integer = 0 To parts.Length - 1
-                parts(i) = Uri.EscapeDataString(parts(i))
-            Next
-            Return String.Join("/", parts)
-        End Function
-
         Friend Shared Function ExecuteCopyLike(session As ArchiveSession, parsed As CopyMoveArgs, cmd As String) As Tuple(Of ApiCallResult, String)
             If String.Equals(parsed.Source, parsed.Destination, StringComparison.Ordinal) Then
                 Throw New ArgumentException("The source and destination files cannot be the same!")
@@ -46,7 +38,7 @@ Namespace InternetArchiveCli.Commands
             End If
 
             Dim headers = ApiShared.ConvertHeaderValues(parsed.Headers)
-            headers("x-amz-copy-source") = "/" & EscapePathKeepSlash(parsed.Source)
+            headers("x-amz-copy-source") = "/" & ApiShared.EscapeArchivePath(parsed.Source)
             If parsed.Metadata.Count > 0 OrElse parsed.ReplaceMetadata Then
                 headers("x-amz-metadata-directive") = "REPLACE"
             Else
@@ -136,6 +128,9 @@ Namespace InternetArchiveCli.Commands
             If String.IsNullOrWhiteSpace(parsed.Source) OrElse String.IsNullOrWhiteSpace(parsed.Destination) Then
                 Throw New ArgumentException("the following arguments are required: source destination")
             End If
+
+            parsed.Source = ApiShared.NormalizeArchivePath(parsed.Source)
+            parsed.Destination = ApiShared.NormalizeArchivePath(parsed.Destination)
 
             Return parsed
         End Function

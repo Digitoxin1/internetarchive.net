@@ -31,11 +31,11 @@ Namespace InternetArchiveCli.Commands
                     If parsed.Columns.Contains(kvp.Key) Then
                         Dim valueString As String
                         If kvp.Key = "name" AndAlso parsed.Location Then
+                            Dim remotePath As String = ApiShared.EscapeArchivePath(parsed.Identifier & "/" & fileEntry.Name)
                             valueString = String.Format(
-                                "https://{0}/download/{1}/{2}",
+                                "https://{0}/download/{1}",
                                 session.Host,
-                                parsed.Identifier,
-                                fileEntry.Name
+                                remotePath
                             )
                         Else
                             valueString = AsJoinedString(kvp.Value)

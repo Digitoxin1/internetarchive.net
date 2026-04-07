@@ -164,12 +164,13 @@ Namespace InternetArchiveCli.Commands
         End Sub
 
         Private Shared Function BuildDownloadUrl(session As ArchiveSession, identifier As String, fileName As String, requestParams As Dictionary(Of String, Object)) As String
-            Dim encodedFile = EscapePathKeepSlash(fileName)
+            Dim encodedFile = ApiShared.EscapeArchivePath(fileName)
+            Dim normalizedIdentifier As String = ApiShared.NormalizeArchivePath(identifier)
             Dim baseUrl As String = String.Format(
                 "{0}//{1}/download/{2}/{3}",
                 session.Protocol,
                 session.Host,
-                Uri.EscapeDataString(identifier),
+                Uri.EscapeDataString(normalizedIdentifier),
                 encodedFile
             )
             If requestParams Is Nothing OrElse requestParams.Count = 0 Then
@@ -500,15 +501,30 @@ Namespace InternetArchiveCli.Commands
             Dim baseDir As String = If(String.IsNullOrWhiteSpace(destDir), Directory.GetCurrentDirectory(), destDir)
             Dim baseFull As String = Path.GetFullPath(baseDir)
             Dim candidate As String = Path.GetFullPath(candidatePath)
-            Return candidate.StartsWith(baseFull, StringComparison.OrdinalIgnoreCase)
+
+            Dim baseUri As New Uri(AppendDirectorySeparator(baseFull), UriKind.Absolute)
+            Dim candidateUri As New Uri(candidate, UriKind.Absolute)
+            Dim relativeUri As Uri = baseUri.MakeRelativeUri(candidateUri)
+            Dim relativePath As String = ToLocalRelativePath(Uri.UnescapeDataString(relativeUri.ToString()))
+
+            If relativePath.Length = 0 OrElse String.Equals(relativePath, ".", StringComparison.Ordinal) Then
+                Return True
+            End If
+
+            If relativePath.Equals("..", StringComparison.Ordinal) OrElse
+               relativePath.StartsWith(".." & Path.DirectorySeparatorChar, StringComparison.Ordinal) Then
+                Return False
+            End If
+
+            Return Not Path.IsPathRooted(relativePath)
         End Function
 
-        Private Shared Function EscapePathKeepSlash(path As String) As String
-            Dim parts = path.Split("/"c)
-            For i As Integer = 0 To parts.Length - 1
-                parts(i) = Uri.EscapeDataString(parts(i))
-            Next
-            Return String.Join("/", parts)
+        Private Shared Function AppendDirectorySeparator(fullPath As String) As String
+            If fullPath.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal) OrElse
+               fullPath.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal) Then
+                Return fullPath
+            End If
+            Return fullPath & Path.DirectorySeparatorChar
         End Function
 
         Private Shared Function IsDarkItem(metadata As Dictionary(Of String, Object)) As Boolean
@@ -629,7 +645,7 @@ Namespace InternetArchiveCli.Commands
                         parsed.Retries = Integer.Parse(args(i), CultureInfo.InvariantCulture)
                     Case "-I", "--itemlist"
                         i += 1 : EnsureHasValue(args, i, current)
-                        parsed.ItemlistPath = args(i)
+                        parsed.ItemlistPath = NormalizeLocalInputPath(args(i))
                     Case "-S", "--search"
                         i += 1 : EnsureHasValue(args, i, current)
                         parsed.SearchQuery = args(i)
@@ -649,7 +665,7 @@ Namespace InternetArchiveCli.Commands
                     Case "--no-directories" : parsed.NoDirectories = True
                     Case "--destdir"
                         i += 1 : EnsureHasValue(args, i, current)
-                        parsed.DestDir = args(i)
+                        parsed.DestDir = NormalizeLocalInputPath(args(i))
                     Case "-s", "--stdout" : parsed.StdoutOutput = True
                     Case "--no-change-timestamp" : parsed.NoChangeTimestamp = True
                     Case "-p", "--parameters"
@@ -707,7 +723,42 @@ Namespace InternetArchiveCli.Commands
 
         Private Shared Function ResolveDestinationPath(relativePath As String, destDir As String) As String
             Dim baseDir As String = If(String.IsNullOrWhiteSpace(destDir), Directory.GetCurrentDirectory(), destDir)
-            Return Path.GetFullPath(Path.Combine(baseDir, relativePath.Replace("/"c, Path.DirectorySeparatorChar)))
+            Dim normalizedRemoteRelative As String = ApiShared.NormalizeArchivePath(relativePath)
+            Dim segments = normalizedRemoteRelative.Split(New Char() {"/"c}, StringSplitOptions.None)
+            Dim localRelative As String = String.Empty
+            For Each segment In segments
+                If localRelative.Length = 0 Then
+                    localRelative = segment
+                Else
+                    localRelative = Path.Combine(localRelative, segment)
+                End If
+            Next
+            Return Path.GetFullPath(Path.Combine(baseDir, localRelative))
+        End Function
+
+        Private Shared Function NormalizeLocalInputPath(pathValue As String) As String
+            If String.IsNullOrWhiteSpace(pathValue) OrElse String.Equals(pathValue, "-", StringComparison.Ordinal) Then
+                Return pathValue
+            End If
+            Return Path.GetFullPath(pathValue)
+        End Function
+
+        Private Shared Function ToLocalRelativePath(uriRelativePath As String) As String
+            Dim trimmed As String = uriRelativePath.TrimStart("/"c)
+            If trimmed.Length = 0 Then
+                Return String.Empty
+            End If
+
+            Dim segments = trimmed.Split(New Char() {"/"c}, StringSplitOptions.RemoveEmptyEntries)
+            If segments.Length = 0 Then
+                Return String.Empty
+            End If
+
+            Dim localPath As String = segments(0)
+            For i As Integer = 1 To segments.Length - 1
+                localPath = Path.Combine(localPath, segments(i))
+            Next
+            Return localPath
         End Function
 
         Private Shared Function ResolveIdentifiers(session As ArchiveSession, parsed As DownloadArgs) As List(Of String)
@@ -717,7 +768,7 @@ Namespace InternetArchiveCli.Commands
                 For Each line In File.ReadLines(parsed.ItemlistPath)
                     Dim trimmed As String = line.Trim()
                     If trimmed.Length > 0 Then
-                        ids.Add(trimmed)
+                        ids.Add(ApiShared.NormalizeArchivePath(trimmed))
                     End If
                 Next
                 Return ids
@@ -741,19 +792,20 @@ Namespace InternetArchiveCli.Commands
                     End If
                     Dim trimmed As String = line.Trim()
                     If trimmed.Length > 0 Then
-                        ids.Add(trimmed)
+                        ids.Add(ApiShared.NormalizeArchivePath(trimmed))
                     End If
                 End While
                 Return ids
             End If
 
             If Not String.IsNullOrWhiteSpace(parsed.Identifier) Then
-                If parsed.Identifier.IndexOf("/"c) >= 0 Then
-                    Dim parts = parsed.Identifier.Split(New Char() {"/"c}, 2)
+                Dim normalizedIdentifier As String = ApiShared.NormalizeArchivePath(parsed.Identifier)
+                If normalizedIdentifier.IndexOf("/"c) >= 0 Then
+                    Dim parts = normalizedIdentifier.Split(New Char() {"/"c}, 2)
                     ids.Add(parts(0))
                     parsed.Files = New List(Of String) From {parts(1)}
                 Else
-                    ids.Add(parsed.Identifier)
+                    ids.Add(normalizedIdentifier)
                 End If
             End If
 

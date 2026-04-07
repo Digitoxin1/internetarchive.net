@@ -1,4 +1,5 @@
 Imports System.Globalization
+Imports System.IO
 Imports System.Web.Script.Serialization
 Imports Microsoft.VisualBasic.FileIO
 Imports InternetArchive.InternetArchiveCli.Core
@@ -582,7 +583,7 @@ Namespace InternetArchiveCli.Commands
             itemMetadata As Dictionary(Of String, Object),
             target As String
         ) As Dictionary(Of String, Object)
-            Dim actualTarget As String = If(String.IsNullOrWhiteSpace(target), "metadata", target)
+            Dim actualTarget As String = ApiShared.NormalizeArchivePath(If(String.IsNullOrWhiteSpace(target), "metadata", target))
             If String.Equals(actualTarget, "metadata", StringComparison.OrdinalIgnoreCase) Then
                 Dim mdNode As Object = Nothing
                 If itemMetadata.TryGetValue("metadata", mdNode) Then
@@ -745,7 +746,7 @@ Namespace InternetArchiveCli.Commands
                     Case "-s", "--spreadsheet"
                         i += 1
                         EnsureHasValue(args, i, current)
-                        parsed.SpreadsheetPath = args(i)
+                        parsed.SpreadsheetPath = Path.GetFullPath(args(i))
                     Case "-e", "--exists"
                         parsed.ExistsCheck = True
                     Case "-F", "--formats"

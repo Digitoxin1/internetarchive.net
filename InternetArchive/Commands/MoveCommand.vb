@@ -40,7 +40,7 @@ Namespace InternetArchiveCli.Commands
             End If
             headerMap("x-archive-cascade-delete") = "1"
 
-            Dim sourceIdentifier As String = parsed.Source.Split("/"c)(0)
+            Dim sourceIdentifier As String = ApiShared.NormalizeArchivePath(parsed.Source).Split("/"c)(0)
             Dim deleteResult = session.DeleteS3File(sourceIdentifier, sourceFilename, headerMap, 2)
             If deleteResult.StatusCode = 204 Then
                 Console.Error.WriteLine(

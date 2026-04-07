@@ -268,7 +268,8 @@ Module Program
         Next
     End Sub
 
-    Private Function ValidateConfigPath(path As String, rawArgs As IList(Of String)) As String
+    Private Function ValidateConfigPath(configPath As String, rawArgs As IList(Of String)) As String
+        Dim resolvedPath As String = Path.GetFullPath(configPath)
         Dim configureSeen As Boolean = False
         For Each value In rawArgs
             If String.Equals(value, "configure", StringComparison.OrdinalIgnoreCase) OrElse
@@ -278,11 +279,11 @@ Module Program
             End If
         Next
 
-        If Not configureSeen AndAlso Not File.Exists(path) Then
-            Throw New ArgumentException(String.Format("Config file does not exist: {0}", path))
+        If Not configureSeen AndAlso Not File.Exists(resolvedPath) Then
+            Throw New ArgumentException(String.Format("Config file does not exist: {0}", resolvedPath))
         End If
 
-        Return path
+        Return resolvedPath
     End Function
 
     Private NotInheritable Class CommandDefinition

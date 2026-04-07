@@ -161,6 +161,9 @@ Namespace InternetArchiveCli.Services
                     isXdg = True
                 End If
             End If
+            If Not String.IsNullOrWhiteSpace(configFile) Then
+                configFile = Path.GetFullPath(configFile)
+            End If
             Return Tuple.Create(configFile, isXdg)
         End Function
         Public Shared Function ResolveConfigFile(configFile As String) As String
